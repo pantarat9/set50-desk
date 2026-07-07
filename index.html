@@ -201,7 +201,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
 <div class="topbar">
   <div class="tb-logo"><div class="dot"></div><div class="tb-logo-text">SET50 <span>Desk</span> <span style="font-size:10px;color:var(--text3);font-weight:400">v6</span></div></div>
   <div class="tb-cells">
-    <div class="tbc"><div class="tbc-l">Series / DTE</div><div class="tbc-v" id="tb-series" style="color:var(--cyan)">S50M26</div><div class="tbc-s" id="tb-expiry">Jun 2026 <span id="tb-dte-chip" class="dte-chip"></span></div></div>
+    <div class="tbc"><div class="tbc-l">Series / DTE</div><div class="tbc-v" id="tb-series" style="color:var(--cyan)">S50U26</div><div class="tbc-s" id="tb-expiry"><span id="tb-expiry-lbl">Sep 2026</span> <span id="tb-dte-chip" class="dte-chip"></span></div></div>
     <div class="tbc"><div class="tbc-l">SET50 Spot</div><div class="tbc-v" id="tb-spot" style="color:var(--cyan)">1030.0</div><div class="tbc-s" id="tb-spot-s">index</div></div>
     <div class="tbc"><div class="tbc-l">Future</div><div class="tbc-v" id="tb-fut">1030.2</div><div class="tbc-s" id="tb-basis" style="color:var(--amber)">basis 0.0</div></div>
     <div class="tbc"><div class="tbc-l">Port P&amp;L (pts)</div><div class="tbc-v" id="tb-pnl" style="color:var(--green)">0.0</div><div class="tbc-s" id="tb-pnl-b">฿0</div></div>
@@ -821,6 +821,14 @@ function buildCloudUI() {
   };
   document.body.appendChild(b);
 
+  var da = document.createElement('div');
+  da.id = 'del-acct';
+  da.style.cssText = 'position:fixed;bottom:38px;right:10px;z-index:9999;font:10px -apple-system,Segoe UI,sans-serif;background:#161b22;border:1px solid #b62324;border-radius:12px;padding:3px 10px;color:#f85149;cursor:pointer;user-select:none;display:none';
+  da.textContent = 'delete account';
+  da.title = 'Permanently delete your account and all your data';
+  da.onclick = _deleteAccount;
+  document.body.appendChild(da);
+
   var o = document.createElement('div');
   o.id = 'login-ovl';
   o.style.cssText = 'position:fixed;inset:0;z-index:10000;background:#0d1117;display:none;align-items:center;justify-content:center';
@@ -842,7 +850,7 @@ function buildCloudUI() {
 }
 function setBadge(t, c) { var b = document.getElementById('sync-badge'); if (b) { b.textContent = t; b.style.color = c || '#8b949e'; } }
 function _err(m) { var e = document.getElementById('cl-err'); if (e) e.textContent = m || ''; }
-function showLogin() { document.getElementById('login-ovl').style.display = 'flex'; setBadge('signed out', '#8b949e'); }
+function showLogin() { document.getElementById('login-ovl').style.display = 'flex'; setBadge('signed out', '#8b949e'); var _da = document.getElementById('del-acct'); if (_da) _da.style.display = 'none'; }
 function hideLogin() { document.getElementById('login-ovl').style.display = 'none'; }
 
 function _doAuth(method) {
@@ -858,9 +866,20 @@ function _doAuth(method) {
   }).catch(function (e) { _err('Network error — check connection.'); });
 }
 
+function _deleteAccount() {
+  if (!LS.sb || !LS.uid) return;
+  if (!confirm('Delete your account? This permanently removes your login and ALL your positions and data. This cannot be undone.')) return;
+  if (!confirm('Are you absolutely sure? Export a JSON backup first if you want to keep anything.')) return;
+  setBadge('deleting…', '#d29922');
+  LS.sb.rpc('delete_own_account').then(function (r) {
+    if (r.error) { setBadge('delete failed', '#f85149'); alert('Delete failed: ' + r.error.message); return; }
+    if (LS.sb.auth.signOut) { LS.sb.auth.signOut().then(function () { location.reload(); }); } else { location.reload(); }
+  }).catch(function (e) { setBadge('delete failed', '#f85149'); alert('Network error deleting account.'); });
+}
 function afterLogin(session) {
   LS.uid = session.user.id;
   hideLogin();
+  var _da = document.getElementById('del-acct'); if (_da) _da.style.display = 'block';
   setBadge('loading…', '#d29922');
   try { LS.dirty = JSON.parse((_realLS && _realLS.getItem('s50__dirty')) || '{}'); } catch (e) { LS.dirty = {}; }
   LS.sb.from('desk_kv').select('key,value').then(function (r) {
@@ -2371,6 +2390,11 @@ function renderTopbar(){
     else if(dte<=9){dteChip.style.cssText='background:rgba(255,170,0,.15);color:var(--amber);border:1px solid var(--amber);display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:IBM Plex Mono,monospace;margin-left:4px';}
     else{dteChip.style.cssText='background:transparent;color:var(--text3);border:1px solid var(--border);display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:400;font-family:IBM Plex Mono,monospace;margin-left:4px';}
   }
+  // FIX: live front-series label in topbar banner (was hardcoded S50M26)
+  var _fs=getDefaultSeries();
+  var _tbSer=document.getElementById('tb-series'); if(_tbSer)_tbSer.textContent=_fs;
+  var _tbExp=document.getElementById('tb-expiry-lbl'); var _fex=seriesExpiry(_fs);
+  if(_tbExp&&_fex){var _MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];_tbExp.textContent=_MON[_fex.getMonth()]+' '+_fex.getFullYear();}
   renderSBSummary(inp);
 }
 function renderSBSummary(inp){
