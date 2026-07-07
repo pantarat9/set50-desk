@@ -829,6 +829,14 @@ function buildCloudUI() {
   da.onclick = _deleteAccount;
   document.body.appendChild(da);
 
+  var lo = document.createElement('div');
+  lo.id = 'log-out';
+  lo.style.cssText = 'position:fixed;bottom:66px;right:10px;z-index:9999;font:10px -apple-system,Segoe UI,sans-serif;background:#161b22;border:1px solid #30363d;border-radius:12px;padding:3px 10px;color:#8b949e;cursor:pointer;user-select:none;display:none';
+  lo.textContent = 'log out';
+  lo.title = 'Sign out of cloud sync on this device';
+  lo.onclick = function () { if (LS.sb && confirm('Log out of this device?')) { setBadge('logging out…', '#d29922'); LS.sb.auth.signOut().then(function () { location.reload(); }); } };
+  document.body.appendChild(lo);
+
   var o = document.createElement('div');
   o.id = 'login-ovl';
   o.style.cssText = 'position:fixed;inset:0;z-index:10000;background:#0d1117;display:none;align-items:center;justify-content:center';
@@ -850,7 +858,7 @@ function buildCloudUI() {
 }
 function setBadge(t, c) { var b = document.getElementById('sync-badge'); if (b) { b.textContent = t; b.style.color = c || '#8b949e'; } }
 function _err(m) { var e = document.getElementById('cl-err'); if (e) e.textContent = m || ''; }
-function showLogin() { document.getElementById('login-ovl').style.display = 'flex'; setBadge('signed out', '#8b949e'); var _da = document.getElementById('del-acct'); if (_da) _da.style.display = 'none'; }
+function showLogin() { document.getElementById('login-ovl').style.display = 'flex'; setBadge('signed out', '#8b949e'); var _da = document.getElementById('del-acct'); if (_da) _da.style.display = 'none'; var _lo = document.getElementById('log-out'); if (_lo) _lo.style.display = 'none'; }
 function hideLogin() { document.getElementById('login-ovl').style.display = 'none'; }
 
 function _doAuth(method) {
@@ -880,6 +888,7 @@ function afterLogin(session) {
   LS.uid = session.user.id;
   hideLogin();
   var _da = document.getElementById('del-acct'); if (_da) _da.style.display = 'block';
+  var _lo = document.getElementById('log-out'); if (_lo) _lo.style.display = 'block';
   setBadge('loading…', '#d29922');
   try { LS.dirty = JSON.parse((_realLS && _realLS.getItem('s50__dirty')) || '{}'); } catch (e) { LS.dirty = {}; }
   LS.sb.from('desk_kv').select('key,value').then(function (r) {
