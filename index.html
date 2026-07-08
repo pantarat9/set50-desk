@@ -199,7 +199,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
 
 <!-- TOPBAR -->
 <div class="topbar">
-  <div class="tb-logo"><div class="dot"></div><div class="tb-logo-text">SET50 <span>Desk</span> <span style="font-size:10px;color:var(--text3);font-weight:400">v6</span></div></div>
+  <div class="tb-logo"><div class="dot"></div><div class="tb-logo-text">SET50 <span>Desk</span> <span style="font-size:10px;color:var(--cyan);font-weight:400">v7e</span></div></div>
   <div class="tb-cells">
     <div class="tbc"><div class="tbc-l">Series / DTE</div><div class="tbc-v" id="tb-series" style="color:var(--cyan)">S50U26</div><div class="tbc-s" id="tb-expiry"><span id="tb-expiry-lbl">Sep 2026</span> <span id="tb-dte-chip" class="dte-chip"></span></div></div>
     <div class="tbc"><div class="tbc-l">SET50 Spot</div><div class="tbc-v" id="tb-spot" style="color:var(--cyan)">1030.0</div><div class="tbc-s" id="tb-spot-s">index</div></div>
@@ -309,6 +309,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
       <div style="margin-top:8px;display:flex;gap:5px;flex-wrap:wrap">
         <button class="btn btn-a btn-sm btn-full" onclick="quickBookSave()" title="Save current position to book">Save to book</button>
         <button class="btn btn-r btn-sm btn-full" onclick="deleteAllData()" title="Wipe all option legs, futures trades, imported chains, and saved positions from this device — use before sharing the file">Delete all position history</button>
+        <button class="btn btn-c btn-sm btn-full" onclick="downloadShareSafeTemplate()" title="Download a sanitized copy: no cloud config, no positions/trades/book, market data retained">Export share-safe template</button>
       </div>
     </div>
   </div>
@@ -327,6 +328,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
     <span style="display:inline-block;width:1px;background:var(--border);height:18px;margin:0 4px;align-self:center;opacity:.5"></span>
     <button class="ntab" style="font-size:10px;opacity:.75" onclick="goTab('history',this)">History</button>
     <button class="ntab" style="font-size:10px;opacity:.75" onclick="goTab('import',this)">Import</button>
+    <button class="ntab" style="font-size:10px;opacity:.75;color:var(--cyan)" onclick="goTab('diagnostics',this)">Diagnostics</button>
     <button class="ntab" style="font-size:10px;opacity:.75;color:var(--amber)" onclick="goTab('book',this)">Position Book</button>
   </div>
 
@@ -494,13 +496,14 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
           <select id="chain-series-sel" onchange="renderChain()" style="font-size:11px;background:var(--bg3);color:var(--cyan);border:1px solid var(--border2);border-radius:4px;padding:2px 6px;text-transform:none;font-weight:400" title="Auto-populated from standard quarterly series + any chain you import"><!-- populated dynamically by refreshSeriesDropdowns() --></select>
           <span id="chain-lbl" style="color:var(--cyan);text-transform:none;font-weight:400;font-size:11px">model prices</span> <span id="chain-badge" class="tag tc" style="margin-left:4px">Model</span>
         </div>
-        <div style="margin-bottom:8px;font-size:11px;color:var(--text2)">Click <span style="color:var(--green)">Bid</span> to add Short leg · Click <span style="color:var(--cyan)">Last+TV</span> to add Long leg · <span style="color:var(--amber)">TV</span> = time value (price - intrinsic)</div>
+        <div id="chain-warn"></div>
+        <div style="margin-bottom:8px;font-size:11px;color:var(--text2)">Click <span style="color:var(--green)">Bid(S)</span> to add Short · Click <span style="color:var(--cyan)">Offer(L)</span> to add Long · <span style="color:var(--text3)">Last(ref)</span> is reference only</div>
         <div style="overflow-x:auto"><table class="tbl" id="chain-tbl">
           <thead>
             <tr>
-              <th colspan="8" style="color:var(--blue);background:rgba(68,170,255,.06);text-align:center;border-right:2px solid var(--border2)">CALLS</th>
+              <th colspan="9" style="color:var(--blue);background:rgba(68,170,255,.06);text-align:center;border-right:2px solid var(--border2)">CALLS</th>
               <th style="color:var(--cyan);background:var(--bg3);text-align:center;font-size:11px;border-left:2px solid var(--border2);border-right:2px solid var(--border2)">Strike</th>
-              <th colspan="8" style="color:var(--red);background:rgba(255,68,102,.06);text-align:center;border-left:2px solid var(--border2)">PUTS</th>
+              <th colspan="9" style="color:var(--red);background:rgba(255,68,102,.06);text-align:center;border-left:2px solid var(--border2)">PUTS</th>
             </tr>
             <tr>
               <th style="text-align:right">OI</th>
@@ -509,11 +512,13 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
               <th style="text-align:center">Delta</th>
               <th style="text-align:right" title="Theta in baht per day per 1 lot (points/day x 200)">Theta ฿/d</th>
               <th style="text-align:right">Gamma</th>
-              <th style="text-align:right;color:var(--green)">Bid(S)</th>
-              <th style="text-align:right;color:var(--cyan);border-right:2px solid var(--border2)">Last+TV</th>
+              <th style="text-align:right;color:var(--text3)" title="Reference only; not an execution price">Last(ref)</th>
+              <th style="text-align:right;color:var(--cyan)" title="Click to add Long call at offer">Offer(L)</th>
+              <th style="text-align:right;color:var(--green);border-right:2px solid var(--border2)" title="Click to add Short call at bid">Bid(S)</th>
               <th style="background:var(--bg3);text-align:center;border-left:2px solid var(--border2);border-right:2px solid var(--border2)"></th>
-              <th style="text-align:left;color:var(--cyan);border-left:2px solid var(--border2)">Last+TV</th>
-              <th style="text-align:left;color:var(--green)">Bid(S)</th>
+              <th style="text-align:left;color:var(--green);border-left:2px solid var(--border2)" title="Click to add Short put at bid">Bid(S)</th>
+              <th style="text-align:left;color:var(--cyan)" title="Click to add Long put at offer">Offer(L)</th>
+              <th style="text-align:left;color:var(--text3)" title="Reference only; not an execution price">Last(ref)</th>
               <th style="text-align:left">Gamma</th>
               <th style="text-align:left" title="Theta in baht per day per 1 lot (points/day x 200)">Theta ฿/d</th>
               <th style="text-align:left">IV</th>
@@ -652,6 +657,17 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
     </div>
 
     <!-- ══ STRATEGY ══ -->
+    <!-- ══ DIAGNOSTICS ══ -->
+    <div id="t-diagnostics" class="tpanel">
+      <div class="card">
+        <div class="ct" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <span>Data source diagnostics</span>
+          <button class="btn btn-gh btn-xs" onclick="renderDiagnostics()">Refresh</button>
+        </div>
+        <div id="diag-panel"><div class="empty">Open Diagnostics to inspect data provenance.</div></div>
+      </div>
+    </div>
+
     <div id="t-import" class="tpanel">
       <div class="card">
         <div class="ct">Import SET50 option chain — paste directly from TFEX website</div>
@@ -688,7 +704,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
         </div>
         <div class="fld" style="margin-bottom:8px">
           <label>Paste TFEX futures board (S50 series rows — one paste updates every series at once)</label>
-          <textarea id="fq-paste" style="background:var(--bg4);border:1px solid var(--border2);border-radius:5px;padding:10px;font-size:11px;color:var(--text2);font-family:'IBM Plex Mono',monospace;width:100%;min-height:80px;resize:vertical;outline:none;line-height:1.5" placeholder="S50U26&#9;1,030.0&#9;1,036.5&#9;1,028.1&#9;1,034.0&#9;+4.2&#9;...&#10;S50Z26&#9;1,036.0&#9;1,042.0&#9;1,034.5&#9;1,040.5&#9;+4.0&#9;..."></textarea>
+          <textarea id="fq-paste" style="background:var(--bg4);border:1px solid var(--border2);border-radius:5px;padding:10px;font-size:11px;color:var(--text2);font-family:'IBM Plex Mono',monospace;width:100%;min-height:80px;resize:vertical;outline:none;line-height:1.5" placeholder="S50U26&#10;tag-most-active&#10;Sep 26&#9;1,056.3&#9;1,062.5&#9;1,039.1&#9;1,040.1&#9;1,040.3&#9;1,040.4&#9;-17.2 (-1.63%)&#9;176,663&#9;583,655&#9;1,057.60000&#9;-&#10;S50Z26&#10;Dec 26&#9;1,056.1&#9;1,061.6&#9;1,039.6&#9;1,040.5&#9;1,040.7&#9;1,040.6&#9;-16.4 (-1.55%)&#9;13,794&#9;20,139&#9;1,057.00000&#9;-"></textarea>
         </div>
         <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px">
           <button class="btn btn-c" onclick="parseFutBoard()">Parse futures board</button>
@@ -1112,7 +1128,13 @@ var futQuotes={};
 // ============================================================
 var MONTH_CODE={F:1,G:2,H:3,J:4,K:5,M:6,N:7,Q:8,U:9,V:10,X:11,Z:12};
 var CODE_BY_MONTH={1:'F',2:'G',3:'H',4:'J',5:'K',6:'M',7:'N',8:'Q',9:'U',10:'V',11:'X',12:'Z'};
-function parseSeries(s){var m=/^S50([FGHJKMNQUVXZ])(\d{2})$/.exec((s||'').trim().toUpperCase());if(!m)return null;return{month:MONTH_CODE[m[1]],year:2000+(+m[2])};}
+var QUARTERLY_CODES={H:1,M:1,U:1,Z:1};
+var CONSECUTIVE_CODES={F:1,G:1,J:1,K:1,N:1,Q:1,V:1,X:1};
+var TFEX_EXPIRY_TIME='16:30 Bangkok';
+var ROLLOVER_DEFAULT_BDAYS=4; // system requirement default range is 3-5 business days; 4 is the middle.
+function parseSeries(s){var m=/^S50([FGHJKMNQUVXZ])(\d{2})$/.exec((s||'').trim().toUpperCase());if(!m)return null;return{code:m[1],month:MONTH_CODE[m[1]],year:2000+(+m[2])};}
+function seriesCode(series){var p=parseSeries(series);return p?p.code:'';}
+function isQuarterlySeries(series){var c=seriesCode(series);return !!QUARTERLY_CODES[c];}
 function lastTradingDay(year,month){
   var firstNext=(month===12)?new Date(year+1,0,1):new Date(year,month,1);
   var d=new Date(firstNext.getTime()-86400000);                 // last calendar day
@@ -1123,29 +1145,49 @@ function lastTradingDay(year,month){
 }
 function seriesExpiry(series){var p=parseSeries(series);return p?lastTradingDay(p.year,p.month):null;}
 function seriesExpiryISO(series){var d=seriesExpiry(series);if(!d)return '';return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);}
-function seriesDTE(series){var d=seriesExpiry(series);if(!d)return null;var t=new Date();t.setHours(0,0,0,0);return Math.max(0,Math.round((d.getTime()-t.getTime())/86400000)+1);} // FIX v7b: +1 so dte=1 on the LAST TRADING DAY (option lives through its final session; dte=0 would price intrinsic-only with zero Greeks all day). 0 from the day after LTD.
-// SET50 options/futures are quarterly: H(Mar) M(Jun) U(Sep) Z(Dec). List the next several from today.
-function standardSeries(){
-  var now=new Date();var today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
-  var out=[],q=[3,6,9,12];
-  for(var yr=now.getFullYear();yr<=now.getFullYear()+2;yr++){
-    q.forEach(function(mo){ if(lastTradingDay(yr,mo)>=today) out.push('S50'+CODE_BY_MONTH[mo]+(''+yr).slice(-2)); });
+function seriesDTE(series){var d=seriesExpiry(series);if(!d)return null;var t=new Date();t.setHours(0,0,0,0);return Math.max(0,Math.round((d.getTime()-t.getTime())/86400000)+1);} // +1 so dte=1 on LTD; contract lives through 16:30 Bangkok.
+function addMonthsClamped(date,months){var d=new Date(date.getTime());var day=d.getDate();d.setDate(1);d.setMonth(d.getMonth()+months);var last=new Date(d.getFullYear(),d.getMonth()+1,0).getDate();d.setDate(Math.min(day,last));d.setHours(0,0,0,0);return d;}
+function subtractBusinessDays(date,n){var d=new Date(date.getTime());d.setHours(0,0,0,0);while(n>0){d=new Date(d.getTime()-86400000);if(d.getDay()!==0&&d.getDay()!==6)n--;}return d;}
+function contractLifespanMonths(series,instrument){return isQuarterlySeries(series)?(instrument==='future'?12:6):3;}
+function contractStartDate(series,instrument){var ltd=seriesExpiry(series);if(!ltd)return null;return addMonthsClamped(ltd,-contractLifespanMonths(series,instrument||'option'));}
+function contractIsListed(series,instrument,refDate){var p=parseSeries(series),ltd=seriesExpiry(series),start=contractStartDate(series,instrument||'option');if(!p||!ltd||!start)return false;var d=refDate?new Date(refDate):new Date();d.setHours(0,0,0,0);ltd.setHours(0,0,0,0);return d>=start&&d<=ltd;}
+function shouldFetchContractData(series,instrument,refDate){return contractIsListed(series,instrument||'option',refDate);} // important: options quarterly max lookback is 6 months, not 12.
+function activeSeriesFor(instrument,refDate){
+  instrument=instrument||'option';var now=refDate?new Date(refDate):new Date();var out=[];
+  for(var yr=now.getFullYear()-1;yr<=now.getFullYear()+2;yr++){
+    Object.keys(MONTH_CODE).forEach(function(code){var s='S50'+code+(''+yr).slice(-2);if(contractIsListed(s,instrument,now))out.push(s);});
   }
-  return out.slice(0,6);
+  return out.sort(function(a,b){return seriesExpiry(a)-seriesExpiry(b);});
 }
-// Union of standard quarterly series + any series found in saved chains, sorted by expiry.
-function allSeries(){
-  var set={};
-  standardSeries().forEach(function(s){set[s]=1;});
-  histDB.forEach(function(h){if(h&&h.series&&parseSeries(h.series))set[h.series]=1;});
-  legs.forEach(function(l){if(l&&l.series&&parseSeries(l.series))set[l.series]=1;});
-  try{Object.keys(futQuotes||{}).forEach(function(s){if(parseSeries(s))set[s]=1;});}catch(e){} // v7d: quote-only series selectable too
+// Backward-compatible name: option-listed standard series under TFEX lifespan rules.
+function standardSeries(){return activeSeriesFor('option');}
+function nextQuarterlySeries(series){
+  var p=parseSeries(series);if(!p)return null;var q=[3,6,9,12];
+  for(var yr=p.year;yr<=p.year+3;yr++){for(var i=0;i<q.length;i++){if(yr>p.year||q[i]>p.month)return 'S50'+CODE_BY_MONTH[q[i]]+(''+yr).slice(-2);}}
+  return null;
+}
+function rolloverDate(series,n){var ltd=seriesExpiry(series);return ltd?subtractBusinessDays(ltd,n||ROLLOVER_DEFAULT_BDAYS):null;}
+function rolloverDateISO(series,n){var d=rolloverDate(series,n);return d?d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2):'';}
+function shouldRollover(series,refDate,n){var r=rolloverDate(series,n);if(!r)return false;var d=refDate?new Date(refDate):new Date();d.setHours(0,0,0,0);return d.getTime()===r.getTime();}
+function rolloverInfo(series,n){return{current:series,ltd:seriesExpiryISO(series),expiryTime:TFEX_EXPIRY_TIME,rollDate:rolloverDateISO(series,n),target:nextQuarterlySeries(series),n:n||ROLLOVER_DEFAULT_BDAYS};}
+// Union of lifecycle-valid series + any relevant user data, sorted by expiry.
+function allSeries(instrument){
+  instrument=instrument||'option';var set={};
+  activeSeriesFor(instrument).forEach(function(s){set[s]=1;});
+  if(instrument==='option'){
+    histDB.forEach(function(h){if(h&&h.series&&parseSeries(h.series))set[h.series]=1;});
+    legs.forEach(function(l){if(l&&l.series&&parseSeries(l.series))set[l.series]=1;});
+    try{Object.keys(futQuotes||{}).forEach(function(s){if(parseSeries(s)&&contractIsListed(s,'option'))set[s]=1;});}catch(e){}
+  }else{
+    tfexTrades.forEach(function(t){if(t&&t.series&&parseSeries(t.series))set[t.series]=1;});
+    try{Object.keys(futQuotes||{}).forEach(function(s){if(parseSeries(s))set[s]=1;});}catch(e){}
+  }
   return Object.keys(set).sort(function(a,b){var ea=seriesExpiry(a),eb=seriesExpiry(b);return (ea?ea.getTime():9e15)-(eb?eb.getTime():9e15);});
 }
 function getDefaultSeries(){
-  try{var d=LS.getItem('s50_defseries');if(d&&parseSeries(d))return d;}catch(e){}
-  var live=allSeries().filter(function(s){var dte=seriesDTE(s);return dte===null||dte>0;});
-  return live[0]||allSeries()[0]||'S50U26';
+  try{var d=LS.getItem('s50_defseries');if(d&&parseSeries(d)&&contractIsListed(d,'option'))return d;}catch(e){}
+  var live=allSeries('option').filter(function(s){var dte=seriesDTE(s);return (dte===null||dte>0)&&isQuarterlySeries(s);});
+  return live[0]||allSeries('option')[0]||'S50U26';
 }
 
 // ============================================================
@@ -1200,6 +1242,84 @@ function resolveSeriesF(series){
   return {F:(inp.fut||inp.S),atmIV:null,date:'',src:'front-month input',mode:'front',age:null};
 }
 
+// v7e: Data provenance diagnostics. These helpers make stale/approximate inputs
+// visible and actionable instead of letting the model look more precise than it is.
+function quoteModeLabel(rq){
+  if(!rq)return 'unknown';
+  if(rq.mode==='quote')return 'fresh '+rq.src+' quote '+(rq.date||'');
+  if(rq.mode==='stale')return 'STALE '+rq.age+'bd '+rq.src+' quote '+(rq.date||'');
+  return 'APPROX front-month F — no quote stored';
+}
+function chainWarningHTML(series,rq,isReal){
+  if(isReal)return '';
+  if(!rq)return '';
+  if(rq.mode==='front'){
+    return '<div class="alert al-a" style="font-size:11px;margin-bottom:8px"><strong>Approximation warning:</strong> no futures quote for '+series+'. Model chain is using the front-month Future. Paste the TFEX futures board or add a manual quote before trusting delta/FV/moneyness.</div>';
+  }
+  if(rq.mode==='stale'){
+    return '<div class="alert al-a" style="font-size:11px;margin-bottom:8px"><strong>Stale quote:</strong> '+series+' F='+f(rq.F,1)+' from '+rq.date+' ('+rq.age+' business days old). Refresh via Import → futures board if using this for hedge sizing.</div>';
+  }
+  return '';
+}
+function setChainWarning(series,rq,isReal){var el=document.getElementById('chain-warn');if(el)el.innerHTML=chainWarningHTML(series,rq,isReal);}
+function diagnosticsSnapshot(){
+  var inp=gi();
+  var sel=document.getElementById('chain-series-sel');
+  var series=sel?sel.value:getDefaultSeries();
+  var rq=resolveSeriesF(series);
+  var entry=histDB.find(function(h){return h.series===series;});
+  var cloudConfigured=(typeof SB_URL==='string'&&SB_URL.indexOf('PASTE')!==0&&typeof SB_KEY==='string'&&SB_KEY.indexOf('PASTE')!==0);
+  var syncBadge=document.getElementById('sync-badge');
+  var chainMode=entry?('Real chain '+entry.date+' · F '+f(entry.fut,1)):'Model chain';
+  var ivSrc=(rq&&rq.atmIV>0)?('quote ATM IV '+rq.atmIV+'%'):(entry?'chain row IV / smile':'front input IV '+f(inp.iv,1)+'%');
+  var ri=rolloverInfo(series,ROLLOVER_DEFAULT_BDAYS);
+  return {series:series,dte:seriesDTE(series),expiry:seriesExpiryISO(series),expiryTime:TFEX_EXPIRY_TIME,rq:rq,chainMode:chainMode,ivSrc:ivSrc,
+    optionStart:contractStartDate(series,'option'),futureStart:contractStartDate(series,'future'),optionListed:contractIsListed(series,'option'),futureListed:contractIsListed(series,'future'),quarterly:isQuarterlySeries(series),roll:ri,
+    cloudConfigured:cloudConfigured,syncText:syncBadge?syncBadge.textContent:'not started',histCount:histDB.length,
+    quoteCount:Object.keys(futQuotes||{}).length,legs:legs.length,tfex:tfexTrades.length,book:(typeof posBook!=='undefined'?posBook.length:0)};
+}
+function fmtDate(d){if(!d)return '-';return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);}
+function diagRow(k,v,cls){return '<tr><td style="text-align:left;color:var(--text3)">'+k+'</td><td class="mono" style="text-align:left;color:'+(cls||'var(--text2)')+'">'+v+'</td></tr>';}
+function renderDiagnostics(){
+  var el=document.getElementById('diag-panel');if(!el)return;
+  var d=diagnosticsSnapshot(), rq=d.rq||{};
+  var qColor=rq.mode==='quote'?'var(--green)':rq.mode==='stale'?'var(--amber)':'var(--red)';
+  var html='<div class="alert '+(rq.mode==='quote'?'al-g':rq.mode==='stale'?'al-a':'al-r')+'" style="font-size:11px">'+
+    '<strong>Selected series:</strong> '+d.series+' · DTE '+(d.dte!==null?d.dte:'?')+' · Expiry '+(d.expiry||'-')+'<br>'+quoteModeLabel(rq)+'</div>';
+  html+='<div style="overflow-x:auto"><table class="tbl"><tbody>';
+  html+=diagRow('Chain mode',d.chainMode);
+  html+=diagRow('Future F source',quoteModeLabel(rq),qColor);
+  html+=diagRow('Future F used',rq.F?f(rq.F,2):'-');
+  html+=diagRow('ATM IV source',d.ivSrc);
+  html+=diagRow('Series type',d.quarterly?'Quarterly high-liquidity':'Consecutive / near-month low-liquidity',d.quarterly?'var(--green)':'var(--amber)');
+  html+=diagRow('LTD / expiry time',d.expiry+' · '+d.expiryTime);
+  html+=diagRow('Option lifecycle',fmtDate(d.optionStart)+' → '+d.expiry+' ('+(d.optionListed?'listed now':'not listed now')+')',d.optionListed?'var(--green)':'var(--amber)');
+  html+=diagRow('Futures lifecycle',fmtDate(d.futureStart)+' → '+d.expiry+' ('+(d.futureListed?'listed now':'not listed now')+')',d.futureListed?'var(--green)':'var(--amber)');
+  html+=diagRow('Rollover rule',d.roll.rollDate+' → '+d.roll.target+' ('+d.roll.n+' business days before LTD)');
+  html+=diagRow('Saved market-data days',d.histCount);
+  html+=diagRow('Stored futures quotes',d.quoteCount);
+  html+=diagRow('Open option legs',d.legs);
+  html+=diagRow('Futures trade entries',d.tfex);
+  html+=diagRow('Saved position-book entries',d.book);
+  html+=diagRow('Cloud configured',d.cloudConfigured?'yes':'no / local-only',d.cloudConfigured?'var(--green)':'var(--amber)');
+  html+=diagRow('Sync badge',d.syncText);
+  html+='</tbody></table></div>';
+  if(rq.mode!=='quote')html+='<div class="alert al-a" style="font-size:11px;margin-top:8px"><strong>Action:</strong> refresh futures quotes in Import → Futures board before using model-chain FV badges or hedge delta for '+d.series+'.</div>';
+  html+='<div class="alert al-c" style="font-size:10px;margin-top:8px">Security: use <strong>Export share-safe template</strong> before sending the desk file to anyone. It removes cloud config and position seed data from the downloaded copy.</div>';
+  el.innerHTML=html;
+}
+function downloadShareSafeTemplate(){
+  if(!confirm('Download a share-safe template copy?\n\nIt removes Supabase config and built-in position/trade seed data from the downloaded HTML. Market-data seeds stay.'))return;
+  var html='<!DOCTYPE html>\n'+document.documentElement.outerHTML;
+  html=html.replace(/var SB_URL = '[^']*';/, "var SB_URL = 'https://xrvutzfjqckcdvralqzf.supabase.co';");
+  html=html.replace(/var SB_KEY = '[^']*';/, "var SB_KEY = 'sb_publishable_sv8QknZX0IbbOWgGILFIXA_4BReam9K';");
+  html=html.replace(/SET50 <span>Desk<\/span> <span style="font-size:10px;color:[^\"]+;font-weight:400">[^<]*<\/span>/, 'SET50 <span>Desk</span> <span style="font-size:10px;color:var(--amber);font-weight:400">Share Template</span>');
+  html=html.replace(/tfexTrades = \[[\s\S]*?\];\s*legs = \[[\s\S]*?\];/, 'tfexTrades = [];\nlegs = [];');
+  html=html.replace(/saveState\(\);saveTfex\(\);/g, 'saveState();saveTfex();');
+  var blob=new Blob([html],{type:'text/html'});var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download='set50_desk_v7e_share_template.html';a.click();setTimeout(function(){URL.revokeObjectURL(a.href);},1000);
+}
+
 // --- v7d: Futures board paste parser ---------------------------------------
 // Tolerant of the TFEX futures board layout (Series, Open, High, Low, Last,
 // Chg, %Chg, Bid, Offer, Vol, OI, Settle...). We never trust column position
@@ -1212,31 +1332,41 @@ function parseFutBoard(){
   var txt=document.getElementById('fq-paste').value||'';
   var msg=document.getElementById('fq-msg');
   fqParsed=[];
-  var lines=txt.split(/\r?\n/);
-  lines.forEach(function(line){
-    // Match a futures series token; skip option symbols like S50U26C1030 / S50U26P950
-    var m=/(^|\s)(S50[FGHJKMNQUVXZ]\d{2})(?![CP]?\d)/i.exec(line);
-    if(!m)return;
-    var series=m[2].toUpperCase();
-    if(!parseSeries(series))return;
-    var rest=line.slice(line.toUpperCase().indexOf(series)+series.length);
-    var nums=(rest.match(/-?[\d,]+\.?\d*/g)||[]).map(function(t){return parseFloat(t.replace(/,/g,''));}).filter(function(v){return isFinite(v);});
+  var lines=txt.split(/\r?\n/).map(function(x){return (x||'').trim();}).filter(Boolean);
+  function isSeriesLine(line){return /(^|\s)S50[FGHJKMNQUVXZ]\d{2}(?![CP]?\d)/i.test(line);}
+  function pickFutureFromBlock(series,block){
+    var nums=(block.match(/-?[\d,]+\.?\d*/g)||[]).map(function(t){return parseFloat(t.replace(/,/g,''));}).filter(function(v){return isFinite(v);});
     var plaus=nums.filter(function(v){return v>=500&&v<=2000;});
     var F=null,how='';
-    if(plaus.length>=4){F=plaus[3];how='4th price col (Last)';}
+    // Current TFEX web table copies rows as: Contract Month, Open, High, Low, Bid, Offer, Last, Chg, Vol, OI, Prior SP, SP.
+    // Therefore the 6th plausible index-level price is Last. Older compact paste examples had only OHLC/Last, where 4th was Last.
+    if(plaus.length>=6){F=plaus[5];how='6th price col (Last: Open/High/Low/Bid/Offer/Last)';}
+    else if(plaus.length>=4){F=plaus[3];how='4th price col (Last in compact OHLC layout)';}
     else if(plaus.length===3){F=plaus[2];how='3rd price col';}
     else if(plaus.length===2){F=+((plaus[0]+plaus[1])/2).toFixed(2);how='mid of 2';}
     else if(plaus.length===1){F=plaus[0];how='single price';}
     if(F!==null&&!fqParsed.some(function(r){return r.series===series;}))fqParsed.push({series:series,F:F,how:how,all:plaus});
-  });
-  if(!fqParsed.length){msg.innerHTML='<div class="alert al-r">No S50 futures series rows found. Paste rows from the TFEX futures board (e.g. lines starting with S50U26, S50Z26...).</div>';document.getElementById('fq-prev').innerHTML='';return;}
-  var html='<div style="font-size:11px;color:var(--green);margin-bottom:6px">Found '+fqParsed.length+' series. Check the F column (auto-picked: 4th price on the line = Last in the standard board layout) — correct it if the board layout differs, then save.</div>';
-  html+='<table class="tbl"><thead><tr><th>Series</th><th>DTE</th><th>F (editable)</th><th>Picked from</th><th>Prices seen on line</th></tr></thead><tbody>';
+  }
+  for(var i=0;i<lines.length;i++){
+    var line=lines[i];
+    var m=/(^|\s)(S50[FGHJKMNQUVXZ]\d{2})(?![CP]?\d)/i.exec(line);
+    if(!m)continue;
+    var series=m[2].toUpperCase();
+    if(!parseSeries(series))continue;
+    var block=line.slice(line.toUpperCase().indexOf(series)+series.length);
+    // Support TFEX clipboard format where the series is on one line, optional tag-most-active on next,
+    // then the contract-month/prices row on the following line. Collect until the next futures series.
+    for(var j=i+1;j<lines.length&&!isSeriesLine(lines[j]);j++)block+=' '+lines[j];
+    pickFutureFromBlock(series,block);
+  }
+  if(!fqParsed.length){msg.innerHTML='<div class="alert al-r">No S50 futures series rows found. Paste rows from the TFEX futures board. Supports both one-line rows and TFEX multi-line copy format.</div>';document.getElementById('fq-prev').innerHTML='';return;}
+  var html='<div style="font-size:11px;color:var(--green);margin-bottom:6px">Found '+fqParsed.length+' series. Check the F column. Current TFEX layout uses the 6th price column as Last (Open/High/Low/Bid/Offer/Last); correct it if the board layout differs, then save.</div>';
+  html+='<table class="tbl"><thead><tr><th>Series</th><th>DTE</th><th>F (editable)</th><th>Picked from</th><th>Prices seen on row</th></tr></thead><tbody>';
   fqParsed.forEach(function(r,i){
     var dte=seriesDTE(r.series);
-    html+='<tr><td class="strike">'+r.series+'</td><td>'+(dte!==null?dte+'d':'-')+'</td>'+
-      '<td><input type="number" step="0.1" id="fq-prev-f-'+i+'" value="'+r.F+'" style="width:95px;background:var(--bg4);border:1px solid var(--border2);border-radius:4px;padding:3px 6px;font-size:11px;color:var(--cyan)"></td>'+
-      '<td style="font-size:10px;color:var(--text3)">'+r.how+'</td>'+
+    html+='<tr><td class="strike">'+r.series+'</td><td>'+(dte!==null?dte+'d':'-')+'</td>'+ 
+      '<td><input type="number" step="0.1" id="fq-prev-f-'+i+'" value="'+r.F+'" style="width:95px;background:var(--bg4);border:1px solid var(--border2);border-radius:4px;padding:3px 6px;font-size:11px;color:var(--cyan)"></td>'+ 
+      '<td style="font-size:10px;color:var(--text3)">'+r.how+'</td>'+ 
       '<td style="font-size:10px;color:var(--text3)">'+r.all.join(' / ')+'</td></tr>';
   });
   html+='</tbody></table><button class="btn btn-g btn-sm" style="margin-top:8px" onclick="saveFutBoard()">Save these quotes (dated today)</button>';
@@ -1301,25 +1431,27 @@ function futqAddManual(){
 }
 function setDefaultSeries(s){try{LS.setItem('s50_defseries',s);}catch(e){}}
 // Populate a <select> with every known series (label shows DTE). Keeps a valid selection.
-function fillSeriesSelect(sel,preferred){
+function fillSeriesSelect(sel,preferred,instrument){
   if(!sel)return;
+  instrument=instrument||'option';
   var want=preferred||sel.value;
-  var list=allSeries();
+  var list=allSeries(instrument);
   sel.innerHTML=list.map(function(s){
     var dte=seriesDTE(s);
     var tag=dte===null?'':(dte===0?' · exp':' · '+dte+'d');
-    return '<option value="'+s+'">'+s+tag+'</option>';
+    var life=contractIsListed(s,instrument)?'':' · not listed';
+    return '<option value="'+s+'">'+s+tag+life+'</option>';
   }).join('');
   if(want&&list.indexOf(want)>=0)sel.value=want;
   else if(list.length)sel.value=list[0];
 }
 function refreshSeriesDropdowns(){
   var chainSel=document.getElementById('chain-series-sel');
-  if(chainSel)fillSeriesSelect(chainSel,chainSel.value);
+  if(chainSel)fillSeriesSelect(chainSel,chainSel.value,'option');
   var addSel=document.getElementById('a-series');
-  if(addSel)fillSeriesSelect(addSel,addSel.value||getDefaultSeries());
+  if(addSel)fillSeriesSelect(addSel,addSel.value||getDefaultSeries(),'option');
   var qfSel=document.getElementById('qf-series');
-  if(qfSel){fillSeriesSelect(qfSel,qfSel.value||getDefaultSeries());qfSeriesChange();}
+  if(qfSel){fillSeriesSelect(qfSel,qfSel.value||getDefaultSeries(),'future');qfSeriesChange();}
   var lbl=document.getElementById('a-defseries-lbl');
   if(lbl)lbl.textContent='Default for new legs: '+getDefaultSeries();
 }
@@ -2051,6 +2183,7 @@ function renderChain(){
     var sdte=seriesDTE(series);
     var T=Math.max((sdte!==null?sdte:inp.dte),0.5)/365;
     renderChainModel(F,sig,T,series,rq);
+    setChainWarning(series,rq,false);
   }
 }
 // Fair value badge: compare market bid vs BS model price
@@ -2108,11 +2241,13 @@ function chainRow(F,k,T,r,sig,cBid,cOff,cLast,cIV,cOI,cVol,pBid,pOff,pLast,pIV,p
     '<td class="'+cCls+'">'+dBar(cD,true)+'</td>'+
     '<td class="'+cCls+'" style="color:var(--red)">'+cTh.toFixed(2)+'</td>'+
     '<td class="'+cCls+'" style="color:var(--text3)">'+cG.toFixed(4)+'</td>'+
-    '<td class="'+cCls+' g" style="cursor:pointer" onclick="chainAdd(\'call\','+k+',-1,'+(cBid||0)+','+useDte+')" title="Short call '+k+' @ bid">'+(cBid||'-')+cFV+'</td>'+
-    '<td class="'+cCls+'" style="cursor:pointer;color:var(--cyan)" onclick="chainAdd(\'call\','+k+',1,'+(cOff||cBid||0)+','+useDte+')" title="Long call '+k+' @ offer">'+(cLast||cBid||'-')+'<span style="font-size:9px;color:var(--text3)"> TV:'+(cTV>0?cTV:'-')+'</span></td>'+
+    '<td class="'+cCls+'" style="color:var(--text3)" title="Last trade reference only; TV='+(cTV>0?cTV:'-')+'">'+(cLast||'-')+'</td>'+
+    '<td class="'+cCls+'" style="cursor:pointer;color:var(--cyan)" onclick="chainAdd(\'call\','+k+',1,'+(cOff||cBid||0)+','+useDte+')" title="Long call '+k+' @ offer">'+(cOff||'-')+'</td>'+
+    '<td class="'+cCls+' g" style="cursor:pointer;border-right:2px solid var(--border2)" onclick="chainAdd(\'call\','+k+',-1,'+(cBid||0)+','+useDte+')" title="Short call '+k+' @ bid">'+(cBid||'-')+cFV+'</td>'+
     '<td class="strike'+(isATM?' atm':'')+'" style="border-left:2px solid var(--border2);border-right:2px solid var(--border2);text-align:center">'+(k.toLocaleString())+'</td>'+
-    '<td class="'+pCls+'" style="cursor:pointer;color:var(--cyan)" onclick="chainAdd(\'put\','+k+',1,'+(pOff||pBid||0)+','+useDte+')" title="Long put '+k+' @ offer">'+(pLast||pBid||'-')+'<span style="font-size:9px;color:var(--text3)"> TV:'+(pTV>0?pTV:'-')+'</span></td>'+
-    '<td class="'+pCls+' g" style="cursor:pointer" onclick="chainAdd(\'put\','+k+',-1,'+(pBid||0)+','+useDte+')" title="Short put '+k+' @ bid">'+(pBid||'-')+pFV+'</td>'+
+    '<td class="'+pCls+' g" style="cursor:pointer;border-left:2px solid var(--border2)" onclick="chainAdd(\'put\','+k+',-1,'+(pBid||0)+','+useDte+')" title="Short put '+k+' @ bid">'+(pBid||'-')+pFV+'</td>'+
+    '<td class="'+pCls+'" style="cursor:pointer;color:var(--cyan)" onclick="chainAdd(\'put\','+k+',1,'+(pOff||pBid||0)+','+useDte+')" title="Long put '+k+' @ offer">'+(pOff||'-')+'</td>'+
+    '<td class="'+pCls+'" style="color:var(--text3)" title="Last trade reference only; TV='+(pTV>0?pTV:'-')+'">'+(pLast||'-')+'</td>'+
     '<td class="'+pCls+'" style="color:var(--text3)">'+pG.toFixed(4)+'</td>'+
     '<td class="'+pCls+'" style="color:var(--red)">'+pTh.toFixed(2)+'</td>'+
     '<td class="'+pCls+' a">'+(pIV?pIV+'%':'-')+'</td>'+
@@ -2165,6 +2300,7 @@ function renderChainReal(entry){
   document.getElementById('chain-body').innerHTML=html;
   document.getElementById('chain-badge').textContent='Real '+entry.date;document.getElementById('chain-badge').className='tag tg';
   document.getElementById('chain-lbl').textContent=entry.series+' - '+entry.date;
+  setChainWarning(series,null,true);
 }
 function chainAdd(tp,K,ls,prem,dte){
   var sel=document.getElementById('chain-series-sel');
@@ -2690,6 +2826,7 @@ function goTab(id,btn){
   else if(id==='scenario')runScen();
   else if(id==='history')renderHist();
   else if(id==='import')prefillImport();
+  else if(id==='diagnostics')renderDiagnostics();
   else if(id==='strategy')renderStrat();
   if(id==='book'){document.getElementById('bk-date').value=new Date().toISOString().slice(0,10);bookRender();}
 }
@@ -2707,6 +2844,7 @@ function ua(){
   else if(id==='sensitivity'){renderSens();renderDeltaHedge();}
   else if(id==='scenario'){runScen();renderScenMatrix();renderMarginPanel();}
   else if(id==='strategy')renderStrat();
+  else if(id==='diagnostics')renderDiagnostics();
   else if(id==='book')bookRender();
 }
 
@@ -3756,8 +3894,8 @@ refreshLegDTE();
 })();
 // Populate the Chain + Quick-Add series dropdowns and seed the Quick-Add series/DTE
 refreshSeriesDropdowns();
-(function(){var as=document.getElementById('a-series');if(as){fillSeriesSelect(as,getDefaultSeries());onAddSeriesChange();}
-  var cs=document.getElementById('chain-series-sel');if(cs&&!cs.value){fillSeriesSelect(cs,getDefaultSeries());}})();
+(function(){var as=document.getElementById('a-series');if(as){fillSeriesSelect(as,getDefaultSeries(),'option');onAddSeriesChange();}
+  var cs=document.getElementById('chain-series-sel');if(cs&&!cs.value){fillSeriesSelect(cs,getDefaultSeries(),'option');}})();
 // Restore the market inputs you last used (skips on the very first run, where the demo defaults apply)
 loadInputs();updateDTE();
 // Mark the demo as seeded so it never overwrites your own data on future loads
