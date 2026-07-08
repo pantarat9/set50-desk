@@ -507,7 +507,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
               <th style="text-align:right">Vol</th>
               <th style="text-align:right">IV</th>
               <th style="text-align:center">Delta</th>
-              <th style="text-align:right">Theta</th>
+              <th style="text-align:right" title="Theta in baht per day per 1 lot (points/day x 200)">Theta ฿/d</th>
               <th style="text-align:right">Gamma</th>
               <th style="text-align:right;color:var(--green)">Bid(S)</th>
               <th style="text-align:right;color:var(--cyan);border-right:2px solid var(--border2)">Last+TV</th>
@@ -515,7 +515,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
               <th style="text-align:left;color:var(--cyan);border-left:2px solid var(--border2)">Last+TV</th>
               <th style="text-align:left;color:var(--green)">Bid(S)</th>
               <th style="text-align:left">Gamma</th>
-              <th style="text-align:left">Theta</th>
+              <th style="text-align:left" title="Theta in baht per day per 1 lot (points/day x 200)">Theta ฿/d</th>
               <th style="text-align:left">IV</th>
               <th style="text-align:center">Delta</th>
               <th style="text-align:left">Vol</th>
@@ -679,6 +679,34 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
         <div id="im-msg" style="margin-top:4px"></div>
         <div id="im-preview" style="margin-top:10px;overflow-x:auto;max-height:400px;overflow-y:auto"></div>
       </div>
+
+      <!-- v7d: PER-SERIES FUTURES QUOTES -->
+      <div class="card">
+        <div class="ct">Futures quotes per series — for far-month pricing <span class="tag tc" style="margin-left:4px">v7d</span></div>
+        <div class="alert al-c" style="margin-bottom:10px">
+          <strong>Why:</strong> every series has its own futures contract; the Chain tab's model mode prices each series off ITS quote here (never silently off the front month). Filled 3 ways: paste the TFEX <em>futures board</em> below, auto-promoted from chain imports, or edit the table directly.
+        </div>
+        <div class="fld" style="margin-bottom:8px">
+          <label>Paste TFEX futures board (S50 series rows — one paste updates every series at once)</label>
+          <textarea id="fq-paste" style="background:var(--bg4);border:1px solid var(--border2);border-radius:5px;padding:10px;font-size:11px;color:var(--text2);font-family:'IBM Plex Mono',monospace;width:100%;min-height:80px;resize:vertical;outline:none;line-height:1.5" placeholder="S50U26&#9;1,030.0&#9;1,036.5&#9;1,028.1&#9;1,034.0&#9;+4.2&#9;...&#10;S50Z26&#9;1,036.0&#9;1,042.0&#9;1,034.5&#9;1,040.5&#9;+4.0&#9;..."></textarea>
+        </div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px">
+          <button class="btn btn-c" onclick="parseFutBoard()">Parse futures board</button>
+          <button class="btn btn-gh btn-sm" onclick="document.getElementById('fq-paste').value='';document.getElementById('fq-prev').innerHTML='';document.getElementById('fq-msg').innerHTML='';">Clear</button>
+        </div>
+        <div id="fq-msg"></div>
+        <div id="fq-prev" style="margin-top:6px"></div>
+        <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
+          <div style="font-size:11px;color:var(--text2);margin-bottom:6px">Saved quotes (editable — pricing reference for the Chain tab's model mode; fresh &le;1 business day, otherwise flagged STALE)</div>
+          <div id="fq-table"><div class="empty">No futures quotes yet</div></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:7px;margin-top:8px;align-items:end">
+            <div class="fld"><label>Series</label><input type="text" id="fq-new-series" placeholder="S50Z26"></div>
+            <div class="fld"><label>Future F</label><input type="number" id="fq-new-f" step="0.1" placeholder="1040.5"></div>
+            <div class="fld"><label>ATM IV % (optional)</label><input type="number" id="fq-new-iv" step="0.1" placeholder="14.5"></div>
+            <button class="btn btn-g btn-sm" onclick="futqAddManual()">Add / update</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ══ HISTORY ══ -->
@@ -744,8 +772,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
 // If left as PASTE_..., the desk runs in LOCAL-ONLY mode (device storage,
 // no sync) so the file still works before setup.
 // ════════════════════════════════════════════════════════════════
-var SB_URL = 'https://xrvutzfjqckcdvralqzf.supabase.co';   // set50-desk project
-var SB_KEY = 'sb_publishable_sv8QknZX0IbbOWgGILFIXA_4BReam9K'; // publishable key (safe in browser w/ RLS)
+var SB_URL = 'https://xrvutzfjqckcdvralqzf.supabase.co';      // e.g. https://abcdefgh.supabase.co
+var SB_KEY = 'sb_publishable_sv8QknZX0IbbOWgGILFIXA_4BReam9K'; // the "anon / public" key (NOT service_role)
 
 // Real browser localStorage = offline mirror + dirty-queue. May be blocked on file://.
 var _realLS = null;
@@ -1072,6 +1100,10 @@ function smileStatus(){
 // STATE
 // ============================================================
 var legs=[], pfChart=null, importRows=[], histDB=[], tfexTrades=[];
+// v7d: per-series futures quote store: {series:{F, atmIV, date, src}}.
+// src: 'board' (futures board paste) | 'import' (promoted from chain import) | 'manual'.
+// Persisted under 's50_futq' -> rides the existing localStorage/cloud sync layer.
+var futQuotes={};
 
 // ============================================================
 // SERIES & EXPIRY ENGINE
@@ -1107,12 +1139,165 @@ function allSeries(){
   standardSeries().forEach(function(s){set[s]=1;});
   histDB.forEach(function(h){if(h&&h.series&&parseSeries(h.series))set[h.series]=1;});
   legs.forEach(function(l){if(l&&l.series&&parseSeries(l.series))set[l.series]=1;});
+  try{Object.keys(futQuotes||{}).forEach(function(s){if(parseSeries(s))set[s]=1;});}catch(e){} // v7d: quote-only series selectable too
   return Object.keys(set).sort(function(a,b){var ea=seriesExpiry(a),eb=seriesExpiry(b);return (ea?ea.getTime():9e15)-(eb?eb.getTime():9e15);});
 }
 function getDefaultSeries(){
   try{var d=LS.getItem('s50_defseries');if(d&&parseSeries(d))return d;}catch(e){}
   var live=allSeries().filter(function(s){var dte=seriesDTE(s);return dte===null||dte>0;});
   return live[0]||allSeries()[0]||'S50U26';
+}
+
+// ============================================================
+// v7d: PER-SERIES FUTURES QUOTE STORE
+// Every SET50 series has its own futures contract on TFEX — the correct
+// far-month F is a market quote, not a model output. This store holds the
+// latest known F (and optionally ATM IV) per series, filled from:
+//   'board'  — Futures board paste (Import tab)
+//   'import' — promoted automatically from chain imports
+//   'manual' — typed/edited by the user in the quotes table
+// Resolution for pricing (resolveSeriesF) is explicit about freshness:
+//   quote (fresh) -> quote (STALE, amber) -> front-month input F (APPROX).
+// Never silently wrong — every fallback is labeled in the Chain badge.
+// ============================================================
+function todayISO(){var t=new Date();return t.getFullYear()+'-'+('0'+(t.getMonth()+1)).slice(-2)+'-'+('0'+t.getDate()).slice(-2);}
+// Business days between a quote date and today (0 = today, 1 = prev business day...).
+function bizDaysOld(iso){
+  if(!iso)return 999;
+  var d=new Date(iso);d.setHours(0,0,0,0);
+  var t=new Date();t.setHours(0,0,0,0);
+  if(isNaN(d.getTime())||d>t)return 999;
+  var n=0,cur=new Date(d.getTime());
+  while(cur<t){cur=new Date(cur.getTime()+86400000);if(cur.getDay()!==0&&cur.getDay()!==6)n++;if(n>250)break;}
+  return n;
+}
+// Insert/update a series quote. Newer (or same) date wins; an older-dated
+// write never clobbers a fresher quote. Returns true if applied.
+function futqUpsert(series,F,atmIV,date,src){
+  if(!parseSeries(series)||!(+F>0))return false;
+  date=date||todayISO();
+  var ex=futQuotes[series];
+  if(ex&&ex.date&&date<ex.date)return false; // stale write, keep the fresher quote
+  futQuotes[series]={
+    F:+(+F).toFixed(2),
+    atmIV:(+atmIV>0)?+(+atmIV).toFixed(1):((ex&&ex.date===date)?(ex.atmIV||null):null),
+    date:date,src:src||'manual'};
+  saveFutQ();
+  return true;
+}
+function futqDelete(series){delete futQuotes[series];saveFutQ();if(typeof renderFutQ==='function')renderFutQ();refreshSeriesDropdowns();if(typeof renderChain==='function')renderChain();}
+// Resolve the F (and optional ATM IV) to price a series with, plus provenance.
+// Returns {F, atmIV, date, src, mode} where mode: 'quote' | 'stale' | 'front'.
+// 'stale' = more than 1 business day old. 'front' = no quote at all; falls back
+// to the front-month input F — an APPROXIMATION that ignores calendar basis.
+function resolveSeriesF(series){
+  var q=futQuotes&&futQuotes[series];
+  if(q&&+q.F>0){
+    var age=bizDaysOld(q.date);
+    return {F:+q.F,atmIV:(+q.atmIV>0?+q.atmIV:null),date:q.date||'',src:q.src||'?',mode:(age<=1?'quote':'stale'),age:age};
+  }
+  var inp=gi();
+  return {F:(inp.fut||inp.S),atmIV:null,date:'',src:'front-month input',mode:'front',age:null};
+}
+
+// --- v7d: Futures board paste parser ---------------------------------------
+// Tolerant of the TFEX futures board layout (Series, Open, High, Low, Last,
+// Chg, %Chg, Bid, Offer, Vol, OI, Settle...). We never trust column position
+// blindly: plausible index-level prices (500-2000) are collected per line and
+// a default F is picked (4th plausible = Last in OHLC-Last layouts; mid of two;
+// single value as-is). The preview lets the user CORRECT F before saving —
+// nothing enters the store without eyes on it.
+var fqParsed=[];
+function parseFutBoard(){
+  var txt=document.getElementById('fq-paste').value||'';
+  var msg=document.getElementById('fq-msg');
+  fqParsed=[];
+  var lines=txt.split(/\r?\n/);
+  lines.forEach(function(line){
+    // Match a futures series token; skip option symbols like S50U26C1030 / S50U26P950
+    var m=/(^|\s)(S50[FGHJKMNQUVXZ]\d{2})(?![CP]?\d)/i.exec(line);
+    if(!m)return;
+    var series=m[2].toUpperCase();
+    if(!parseSeries(series))return;
+    var rest=line.slice(line.toUpperCase().indexOf(series)+series.length);
+    var nums=(rest.match(/-?[\d,]+\.?\d*/g)||[]).map(function(t){return parseFloat(t.replace(/,/g,''));}).filter(function(v){return isFinite(v);});
+    var plaus=nums.filter(function(v){return v>=500&&v<=2000;});
+    var F=null,how='';
+    if(plaus.length>=4){F=plaus[3];how='4th price col (Last)';}
+    else if(plaus.length===3){F=plaus[2];how='3rd price col';}
+    else if(plaus.length===2){F=+((plaus[0]+plaus[1])/2).toFixed(2);how='mid of 2';}
+    else if(plaus.length===1){F=plaus[0];how='single price';}
+    if(F!==null&&!fqParsed.some(function(r){return r.series===series;}))fqParsed.push({series:series,F:F,how:how,all:plaus});
+  });
+  if(!fqParsed.length){msg.innerHTML='<div class="alert al-r">No S50 futures series rows found. Paste rows from the TFEX futures board (e.g. lines starting with S50U26, S50Z26...).</div>';document.getElementById('fq-prev').innerHTML='';return;}
+  var html='<div style="font-size:11px;color:var(--green);margin-bottom:6px">Found '+fqParsed.length+' series. Check the F column (auto-picked: 4th price on the line = Last in the standard board layout) — correct it if the board layout differs, then save.</div>';
+  html+='<table class="tbl"><thead><tr><th>Series</th><th>DTE</th><th>F (editable)</th><th>Picked from</th><th>Prices seen on line</th></tr></thead><tbody>';
+  fqParsed.forEach(function(r,i){
+    var dte=seriesDTE(r.series);
+    html+='<tr><td class="strike">'+r.series+'</td><td>'+(dte!==null?dte+'d':'-')+'</td>'+
+      '<td><input type="number" step="0.1" id="fq-prev-f-'+i+'" value="'+r.F+'" style="width:95px;background:var(--bg4);border:1px solid var(--border2);border-radius:4px;padding:3px 6px;font-size:11px;color:var(--cyan)"></td>'+
+      '<td style="font-size:10px;color:var(--text3)">'+r.how+'</td>'+
+      '<td style="font-size:10px;color:var(--text3)">'+r.all.join(' / ')+'</td></tr>';
+  });
+  html+='</tbody></table><button class="btn btn-g btn-sm" style="margin-top:8px" onclick="saveFutBoard()">Save these quotes (dated today)</button>';
+  document.getElementById('fq-prev').innerHTML=html;
+  msg.innerHTML='';
+}
+function saveFutBoard(){
+  var n=0,skipped=[];
+  var date=todayISO();
+  fqParsed.forEach(function(r,i){
+    var el=document.getElementById('fq-prev-f-'+i);
+    var F=el?+el.value:r.F;
+    if(futqUpsert(r.series,F,null,date,'board'))n++;else skipped.push(r.series);
+  });
+  fqParsed=[];
+  document.getElementById('fq-prev').innerHTML='';
+  document.getElementById('fq-paste').value='';
+  document.getElementById('fq-msg').innerHTML='<div class="alert al-g">Saved '+n+' futures quotes for '+date+'.'+(skipped.length?' Skipped (fresher quote already stored): '+skipped.join(', '):'')+'</div>';
+  renderFutQ();refreshSeriesDropdowns();if(typeof renderChain==='function')renderChain();
+}
+// --- v7d: quotes table (view + inline edit) ---------------------------------
+function renderFutQ(){
+  var el=document.getElementById('fq-table');if(!el)return;
+  var keys=Object.keys(futQuotes||{}).filter(function(s){return parseSeries(s);}).sort(function(a,b){var ea=seriesExpiry(a),eb=seriesExpiry(b);return (ea?ea.getTime():9e15)-(eb?eb.getTime():9e15);});
+  if(!keys.length){el.innerHTML='<div class="empty">No futures quotes yet</div>';return;}
+  var html='<table class="tbl"><thead><tr><th>Series</th><th>DTE</th><th>Future F</th><th>ATM IV %</th><th>Quote date</th><th>Source</th><th>Freshness</th><th></th></tr></thead><tbody>';
+  keys.forEach(function(s){
+    var q=futQuotes[s];var dte=seriesDTE(s);var age=bizDaysOld(q.date);
+    var fresh=(age<=1)?'<span class="tag tg">fresh</span>':(dte===0?'<span class="tag tr">expired</span>':'<span class="tag ta">STALE '+age+'bd</span>');
+    html+='<tr><td class="strike">'+s+'</td><td>'+(dte!==null?dte+'d':'-')+'</td>'+
+      '<td><input type="number" step="0.1" value="'+q.F+'" onchange="futqEdit(\''+s+'\',\'F\',this.value)" style="width:95px;background:var(--bg4);border:1px solid var(--border2);border-radius:4px;padding:3px 6px;font-size:11px;color:var(--cyan)"></td>'+
+      '<td><input type="number" step="0.1" value="'+(q.atmIV||'')+'" placeholder="-" onchange="futqEdit(\''+s+'\',\'atmIV\',this.value)" style="width:70px;background:var(--bg4);border:1px solid var(--border2);border-radius:4px;padding:3px 6px;font-size:11px;color:var(--text)"></td>'+
+      '<td><input type="date" value="'+(q.date||'')+'" onchange="futqEdit(\''+s+'\',\'date\',this.value)" style="width:130px;background:var(--bg4);border:1px solid var(--border2);border-radius:4px;padding:3px 6px;font-size:11px;color:var(--text)"></td>'+
+      '<td style="font-size:10px;color:var(--text3)">'+(q.src||'-')+'</td>'+
+      '<td>'+fresh+'</td>'+
+      '<td><button class="btn btn-r btn-xs" onclick="futqDelete(\''+s+'\')">X</button></td></tr>';
+  });
+  html+='</tbody></table>';
+  el.innerHTML=html;
+}
+function futqEdit(series,field,val){
+  var q=futQuotes[series];if(!q)return;
+  if(field==='F'){var f=+val;if(!(f>0))return;q.F=+f.toFixed(2);}
+  else if(field==='atmIV'){var iv=+val;q.atmIV=(iv>0&&iv<100)?+iv.toFixed(1):null;}
+  else if(field==='date'){if(val)q.date=val;}
+  q.src='manual';
+  saveFutQ();renderFutQ();if(typeof renderChain==='function')renderChain();
+}
+function futqAddManual(){
+  var s=(document.getElementById('fq-new-series').value||'').trim().toUpperCase();
+  var F=+document.getElementById('fq-new-f').value;
+  var iv=+document.getElementById('fq-new-iv').value;
+  if(!parseSeries(s)){document.getElementById('fq-msg').innerHTML='<div class="alert al-r">Invalid series (expected e.g. S50Z26).</div>';return;}
+  if(!(F>0)){document.getElementById('fq-msg').innerHTML='<div class="alert al-r">Need a Future price.</div>';return;}
+  // Manual entry always wins: write directly (dated today) rather than via
+  // futqUpsert, so the user can deliberately override a same-day board/import quote.
+  futQuotes[s]={F:+F.toFixed(2),atmIV:(iv>0&&iv<100)?+iv.toFixed(1):null,date:todayISO(),src:'manual'};
+  saveFutQ();
+  document.getElementById('fq-new-series').value='';document.getElementById('fq-new-f').value='';document.getElementById('fq-new-iv').value='';
+  document.getElementById('fq-msg').innerHTML='<div class="alert al-g">Quote saved for '+s+'.</div>';
+  renderFutQ();refreshSeriesDropdowns();if(typeof renderChain==='function')renderChain();
 }
 function setDefaultSeries(s){try{LS.setItem('s50_defseries',s);}catch(e){}}
 // Populate a <select> with every known series (label shows DTE). Keeps a valid selection.
@@ -1143,10 +1328,14 @@ function loadState(){
   try{var l=LS.getItem('s50_legs');if(l)legs=JSON.parse(l);}catch(e){}
   try{var h=LS.getItem('s50_hist');if(h)histDB=JSON.parse(h);}catch(e){}
   try{var t=LS.getItem('s50_tfex');if(t)tfexTrades=JSON.parse(t);}catch(e){}
+  try{var q=LS.getItem('s50_futq');if(q)futQuotes=JSON.parse(q)||{};}catch(e){} // v7d
 }
 function saveState(){
   try{LS.setItem('s50_legs',JSON.stringify(legs));}catch(e){}
   try{LS.setItem('s50_hist',JSON.stringify(histDB));}catch(e){}
+}
+function saveFutQ(){ // v7d
+  try{LS.setItem('s50_futq',JSON.stringify(futQuotes));}catch(e){}
 }
 function saveTfex(){
   try{LS.setItem('s50_tfex',JSON.stringify(tfexTrades));}catch(e){}
@@ -1549,11 +1738,12 @@ function clearLegs(){if(confirm('Clear all option legs?')){legs=[];dashActiveSet
 // and the saved position book. Use before handing the file to someone else.
 function deleteAllData(){
   if(!confirm('Delete ALL position history on this device?\n\nThis removes every option leg, futures trade, imported chain, and saved position-book entry. It cannot be undone.'))return;
-  legs=[];tfexTrades=[];histDB=[];posBook=[];importRows=[];dashActiveSet=null;
-  try{['s50_legs','s50_hist','s50_tfex','s50_book','s50_defseries','s50_inputs'].forEach(function(k){LS.removeItem(k);});}catch(e){}
+  legs=[];tfexTrades=[];histDB=[];posBook=[];importRows=[];dashActiveSet=null;futQuotes={};
+  try{['s50_legs','s50_hist','s50_tfex','s50_book','s50_defseries','s50_inputs','s50_futq'].forEach(function(k){LS.removeItem(k);});}catch(e){}
   try{LS.setItem('s50_wiped','1');}catch(e){} // stops the built-in demo data from reloading on this device
-  saveState();saveTfex();if(typeof bookSaveDB==='function')bookSaveDB();
+  saveState();saveTfex();saveFutQ();if(typeof bookSaveDB==='function')bookSaveDB();
   refreshSeriesDropdowns();
+  if(typeof renderFutQ==='function')renderFutQ();
   if(typeof renderHist==='function')renderHist();
   if(typeof renderTfex==='function')renderTfex();
   if(typeof bookRender==='function')bookRender();
@@ -1850,8 +2040,17 @@ function renderChain(){
   var entry=histDB.find(function(h){return h.series===series;});
   if(entry){renderChainReal(entry);}
   else{
-    var S=inp.S;var F=inp.fut||S;var sig=inp.iv/100;var T=inp.dte/365;
-    renderChainModel(F,sig,T);
+    // FIX v7c: use the SELECTED series' own DTE, not the front-month input DTE.
+    // v7d: resolve F per series through the futures quote store —
+    // quote (fresh) -> quote (stale, amber) -> front-month F (labeled APPROX).
+    // If the quote carries an ATM IV, use it as the flat vol base for this
+    // series (front-month IV is wrong for a back month: term structure).
+    var rq=resolveSeriesF(series);
+    var F=rq.F;
+    var sig=(rq.atmIV>0?rq.atmIV:inp.iv)/100;
+    var sdte=seriesDTE(series);
+    var T=Math.max((sdte!==null?sdte:inp.dte),0.5)/365;
+    renderChainModel(F,sig,T,series,rq);
   }
 }
 // Fair value badge: compare market bid vs BS model price
@@ -1878,17 +2077,23 @@ function fvBadge(marketBid, modelPrice, vol, isOTM, type){
   return '';
 }
 
-function chainRow(F,k,T,r,sig,cBid,cOff,cLast,cIV,cOI,cVol,pBid,pOff,pLast,pIV,pOI,pVol,isATM,inp){
+function chainRow(F,k,T,r,sig,cBid,cOff,cLast,cIV,cOI,cVol,pBid,pOff,pLast,pIV,pOI,pVol,isATM,inp,series){
   var cCls=isATM?'atm':k<F?'itmc':'otm';
   var pCls=isATM?'atm':k>F?'itmc':'otm';
-  var cSig=cIV&&+cIV>0?(+cIV/100):getSmileSigma(k,'call',sig);
-  var pSig=pIV&&+pIV>0?(+pIV/100):getSmileSigma(k,'put',sig);
+  // FIX v7c: pass series to getSmileSigma. Before, this defaulted to 'S50M26' —
+  // a U26/Z26 row with blank IV pulled the (expired) M26 smile/IV for its Greeks.
+  var cSig=cIV&&+cIV>0?(+cIV/100):getSmileSigma(k,'call',sig,series);
+  var pSig=pIV&&+pIV>0?(+pIV/100):getSmileSigma(k,'put',sig,series);
   var cD=bsd(F,k,T,0,cSig,'call'),pD=bsd(F,k,T,0,pSig,'put');
   var cTh=bsth(F,k,T,0,cSig,'call')*200,pTh=bsth(F,k,T,0,pSig,'put')*200;
   var cG=bsg(F,k,T,0,cSig),pG=bsg(F,k,T,0,pSig);
   var cIntr=Math.max(0,F-k),pIntr=Math.max(0,k-F);
   var cTV=(cBid?cBid-cIntr:0).toFixed(1),pTV=(pBid?pBid-pIntr:0).toFixed(1);
-  var useDte=inp?inp.dte:35;
+  // FIX v7c: legs added from the chain get the SERIES' own DTE immediately
+  // (before, they got the front-month input DTE and were only corrected by
+  // refreshLegDTE at the next boot — mid-session Greeks were wrong).
+  var sDte=series?seriesDTE(series):null;
+  var useDte=(sDte!==null&&sDte!==undefined)?Math.max(sDte,1):(inp?inp.dte:35);
   // BS model prices (for fair value comparison) — use flat sig at this strike
   var cModel=bsp(F,k,T,0,cSig,'call');
   var pModel=bsp(F,k,T,0,pSig,'put');
@@ -1903,11 +2108,11 @@ function chainRow(F,k,T,r,sig,cBid,cOff,cLast,cIV,cOI,cVol,pBid,pOff,pLast,pIV,p
     '<td class="'+cCls+'">'+dBar(cD,true)+'</td>'+
     '<td class="'+cCls+'" style="color:var(--red)">'+cTh.toFixed(2)+'</td>'+
     '<td class="'+cCls+'" style="color:var(--text3)">'+cG.toFixed(4)+'</td>'+
-    '<td class="'+cCls+' g" style="cursor:pointer" onclick="chainAdd(\'call\','+k+',-1,'+(cOff||cBid||0)+','+useDte+')" title="Short call '+k+'">'+(cBid||'-')+cFV+'</td>'+
-    '<td class="'+cCls+'" style="cursor:pointer;color:var(--cyan)" onclick="chainAdd(\'call\','+k+',1,'+(cOff||cBid||0)+','+useDte+')" title="Long call '+k+'">'+(cLast||cBid||'-')+'<span style="font-size:9px;color:var(--text3)"> TV:'+(cTV>0?cTV:'-')+'</span></td>'+
+    '<td class="'+cCls+' g" style="cursor:pointer" onclick="chainAdd(\'call\','+k+',-1,'+(cBid||0)+','+useDte+')" title="Short call '+k+' @ bid">'+(cBid||'-')+cFV+'</td>'+
+    '<td class="'+cCls+'" style="cursor:pointer;color:var(--cyan)" onclick="chainAdd(\'call\','+k+',1,'+(cOff||cBid||0)+','+useDte+')" title="Long call '+k+' @ offer">'+(cLast||cBid||'-')+'<span style="font-size:9px;color:var(--text3)"> TV:'+(cTV>0?cTV:'-')+'</span></td>'+
     '<td class="strike'+(isATM?' atm':'')+'" style="border-left:2px solid var(--border2);border-right:2px solid var(--border2);text-align:center">'+(k.toLocaleString())+'</td>'+
-    '<td class="'+pCls+'" style="cursor:pointer;color:var(--cyan)" onclick="chainAdd(\'put\','+k+',1,'+(pBid||0)+','+useDte+')" title="Long put '+k+'">'+(pLast||pBid||'-')+'<span style="font-size:9px;color:var(--text3)"> TV:'+(pTV>0?pTV:'-')+'</span></td>'+
-    '<td class="'+pCls+' g" style="cursor:pointer" onclick="chainAdd(\'put\','+k+',-1,'+(pBid||0)+','+useDte+')" title="Short put '+k+'">'+(pBid||'-')+pFV+'</td>'+
+    '<td class="'+pCls+'" style="cursor:pointer;color:var(--cyan)" onclick="chainAdd(\'put\','+k+',1,'+(pOff||pBid||0)+','+useDte+')" title="Long put '+k+' @ offer">'+(pLast||pBid||'-')+'<span style="font-size:9px;color:var(--text3)"> TV:'+(pTV>0?pTV:'-')+'</span></td>'+
+    '<td class="'+pCls+' g" style="cursor:pointer" onclick="chainAdd(\'put\','+k+',-1,'+(pBid||0)+','+useDte+')" title="Short put '+k+' @ bid">'+(pBid||'-')+pFV+'</td>'+
     '<td class="'+pCls+'" style="color:var(--text3)">'+pG.toFixed(4)+'</td>'+
     '<td class="'+pCls+'" style="color:var(--red)">'+pTh.toFixed(2)+'</td>'+
     '<td class="'+pCls+' a">'+(pIV?pIV+'%':'-')+'</td>'+
@@ -1917,21 +2122,26 @@ function chainRow(F,k,T,r,sig,cBid,cOff,cLast,cIV,cOI,cVol,pBid,pOff,pLast,pIV,p
     '</tr>';
 }
 
-function renderChainModel(F,sig,T){
+function renderChainModel(F,sig,T,series,rq){
   var inp=gi();var S=inp.S;
   var html='';
   var chainLo=Math.min(800,Math.round(F/10-10)*10),chainHi=Math.max(1080,Math.round(F/10+10)*10);
   for(var k=chainLo;k<=chainHi;k+=10){
     var isATM=Math.abs(k-F)<=5;
-    var cSigK=getSmileSigma(k,'call',sig),pSigK=getSmileSigma(k,'put',sig);
+    var cSigK=getSmileSigma(k,'call',sig,series),pSigK=getSmileSigma(k,'put',sig,series);
     var cT=+bsp(F,k,T,0,cSigK,'call').toFixed(1),pT=+bsp(F,k,T,0,pSigK,'put').toFixed(1);
     var sp=Math.max(0.1,cT*0.04);
     var cB=+(cT-sp).toFixed(1),cA=+(cT+sp).toFixed(1),pB=+(pT-sp).toFixed(1),pA=+(pT+sp).toFixed(1);
     var cIV=(cSigK*100).toFixed(1),pIV=(pSigK*100).toFixed(1);
-    html+=chainRow(F,k,T,0,sig,cB,cA,cT,cIV,'-','-',pB,pA,pT,pIV,'-','-',isATM,inp);
+    html+=chainRow(F,k,T,0,sig,cB,cA,cT,cIV,'-','-',pB,pA,pT,pIV,'-','-',isATM,inp,series);
   }
   document.getElementById('chain-body').innerHTML=html;
-  document.getElementById('chain-badge').textContent='Model';document.getElementById('chain-badge').className='tag tc';
+  // v7d: badge states DTE + where F came from. Amber whenever F is not a fresh quote.
+  var badge=document.getElementById('chain-badge');
+  var txt='Model \u00b7 '+Math.round(T*365)+'d \u00b7 F '+(+F).toFixed(1);
+  if(rq&&rq.mode==='quote'){badge.textContent=txt+' ('+rq.src+' '+rq.date+')';badge.className='tag tc';}
+  else if(rq&&rq.mode==='stale'){badge.textContent=txt+' \u00b7 STALE '+rq.age+'bd ('+rq.src+' '+rq.date+')';badge.className='tag ta';}
+  else{badge.textContent=txt+' \u00b7 APPROX front-month F \u2014 no quote for this series';badge.className='tag ta';}
 }
 function renderChainReal(entry){
   var inp=gi();var spot=entry.spot;var rows=entry.rows;var series=entry.series||'S50M26';
@@ -1948,8 +2158,9 @@ function renderChainReal(entry){
     var c=rows.find(function(row){return row.strike===k&&row.type==='call';})||{};
     var p=rows.find(function(row){return row.strike===k&&row.type==='put';})||{};
     var isATM=Math.abs(k-F)<=6;
-    var cSig=c.iv?(c.iv/100):getSmileSigma(k,'call',sig,series);var pSig=p.iv?(p.iv/100):getSmileSigma(k,'put',sig,series);
-    html+=chainRow(F,k,T,0,cSig,c.bid,c.offer,c.last,c.iv?c.iv.toFixed(1):null,c.oi,c.vol,p.bid,p.offer,p.last,p.iv?p.iv.toFixed(1):null,p.oi,p.vol,isATM,inp);
+    // v7c: pass the flat base sig + series; chainRow now does the series-aware
+    // per-strike sigma lookup itself (row IV > series smile > flat fallback).
+    html+=chainRow(F,k,T,0,sig,c.bid,c.offer,c.last,c.iv?c.iv.toFixed(1):null,c.oi,c.vol,p.bid,p.offer,p.last,p.iv?p.iv.toFixed(1):null,p.oi,p.vol,isATM,inp,series);
   });
   document.getElementById('chain-body').innerHTML=html;
   document.getElementById('chain-badge').textContent='Real '+entry.date;document.getElementById('chain-badge').className='tag tg';
@@ -2322,8 +2533,50 @@ function saveImport(){
   refreshSeriesDropdowns();
   var chainSel=document.getElementById('chain-series-sel');
   if(chainSel&&parseSeries(series)){fillSeriesSelect(chainSel,series);}
+  // v7d: promote this import into the per-series futures quote store, so the
+  // series prices correctly in model mode even on days you don't re-import.
+  // ATM IV derived model-free from the straddle nearest F:
+  //   IV = (straddle/F) / sqrt(2/pi * T)   (Black-76 ATM approximation)
+  var derivedIV=null;
+  (function(){
+    if(!(fut>0))return;
+    var sdte=seriesDTE(series);if(sdte===null||sdte<1)return;
+    var T=sdte/365;
+    var best=null,bestD=1e9;
+    var strikes=[...new Set(histDB[0].rows.map(function(r){return r.strike;}))];
+    strikes.forEach(function(k){
+      var c=histDB[0].rows.find(function(r){return r.strike===k&&r.type==='call';});
+      var p=histDB[0].rows.find(function(r){return r.strike===k&&r.type==='put';});
+      if(!c||!p)return;
+      var cm=(c.bid&&c.offer)?(c.bid+c.offer)/2:(c.last||c.bid||0);
+      var pm=(p.bid&&p.offer)?(p.bid+p.offer)/2:(p.last||p.bid||0);
+      if(!(cm>0&&pm>0))return;
+      var d=Math.abs(k-fut);
+      if(d<bestD){bestD=d;best={straddle:cm+pm};}
+    });
+    if(best&&bestD<=15){
+      var iv=((best.straddle/fut)/Math.sqrt(2/Math.PI*T))*100;
+      if(iv>3&&iv<80)derivedIV=+iv.toFixed(1);
+    }
+  })();
+  var promoted=futqUpsert(series,fut,derivedIV,date,'import');
+  if(typeof renderFutQ==='function')renderFutQ();
+  // FEATURE v7c: auto-sync the Market panel with the imported spot/future so the
+  // left panel never disagrees with the data just imported. The inputs remain
+  // plain editable fields — the user can override either value manually anytime.
+  // Spot is series-independent -> always sync. Future is per-series -> only sync
+  // when the imported series IS the current front series, otherwise a back-month
+  // future (different basis) would corrupt the front-month dashboard.
+  var syncNote='';
+  var frontSeries=getDefaultSeries();
+  if(spot>0){document.getElementById('i-spot').value=spot;syncNote+=' Market panel: Spot\u2192'+spot;}
+  if(fut>0){
+    if(series===frontSeries){document.getElementById('i-fut').value=fut;syncNote+=', Future\u2192'+fut+'.';}
+    else{syncNote+='. Future NOT synced ('+series+' is a back month; front series is '+frontSeries+' \u2014 different basis). Edit S50 Future manually if you want it.';}
+  }
+  if(promoted)syncNote+=' Futures quote for '+series+' updated: F='+(+fut).toFixed(2)+(derivedIV?' \u00b7 ATM IV\u2248'+derivedIV+'% (straddle-derived)':'')+'.';
   renderChain();
-  document.getElementById('im-msg').innerHTML='<div class="alert al-g">Saved '+histDB[0].rows.length+' rows for '+series+' on '+date+'. It is now selectable in the Chain tab.</div>';
+  document.getElementById('im-msg').innerHTML='<div class="alert al-g">Saved '+histDB[0].rows.length+' rows for '+series+' on '+date+'. It is now selectable in the Chain tab.'+syncNote+'</div>';
   renderHist();
 bookRender();ua();
 }
@@ -3485,6 +3738,22 @@ function refreshLegDTE(){
 }
 
 refreshLegDTE();
+// v7d: one-time seed — promote the NEWEST chain import per series into the
+// futures quote store, so pre-v7d history contributes quotes immediately.
+// Only fills gaps; never overwrites an existing (possibly fresher) quote.
+(function(){
+  var seen={};
+  var changed=false;
+  histDB.forEach(function(h){
+    if(!h||!h.series||!parseSeries(h.series)||seen[h.series])return;
+    seen[h.series]=true; // histDB is sorted newest-first
+    if(!futQuotes[h.series]&&+h.fut>0){
+      futQuotes[h.series]={F:+(+h.fut).toFixed(2),atmIV:null,date:h.date||'',src:'import'};
+      changed=true;
+    }
+  });
+  if(changed)saveFutQ();
+})();
 // Populate the Chain + Quick-Add series dropdowns and seed the Quick-Add series/DTE
 refreshSeriesDropdowns();
 (function(){var as=document.getElementById('a-series');if(as){fillSeriesSelect(as,getDefaultSeries());onAddSeriesChange();}
@@ -3495,6 +3764,7 @@ loadInputs();updateDTE();
 try{ if(SEED_OK) LS.setItem('s50_seeded','1'); }catch(e){}
 prefillImport();
 renderHist();
+renderFutQ(); // v7d
 refreshSmile();
 ua();
 } // end bootDesk
