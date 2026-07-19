@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>SET50 Options Desk v6</title>
+<title>SET50 Options Desk v7g</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=Barlow+Condensed:wght@400;500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
@@ -199,7 +199,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
 
 <!-- TOPBAR -->
 <div class="topbar">
-  <div class="tb-logo"><div class="dot"></div><div class="tb-logo-text">SET50 <span>Desk</span> <span style="font-size:10px;color:var(--cyan);font-weight:400">v7f</span></div></div>
+  <div class="tb-logo"><div class="dot"></div><div class="tb-logo-text">SET50 <span>Desk</span> <span style="font-size:10px;color:var(--cyan);font-weight:400">v7g</span></div></div>
   <div class="tb-cells">
     <div class="tbc"><div class="tbc-l">Series / DTE</div><div class="tbc-v" id="tb-series" style="color:var(--cyan)">S50U26</div><div class="tbc-s" id="tb-expiry"><span id="tb-expiry-lbl">Sep 2026</span> <span id="tb-dte-chip" class="dte-chip"></span></div></div>
     <div class="tbc"><div class="tbc-l">SET50 Spot</div><div class="tbc-v" id="tb-spot" style="color:var(--cyan)">1030.0</div><div class="tbc-s" id="tb-spot-s">index</div></div>
@@ -330,6 +330,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
     <button class="ntab" style="font-size:10px;opacity:.75" onclick="goTab('import',this)">Import</button>
     <button class="ntab" style="font-size:10px;opacity:.75;color:var(--cyan)" onclick="goTab('diagnostics',this)">Diagnostics</button>
     <button class="ntab" style="font-size:10px;opacity:.75;color:var(--amber)" onclick="goTab('book',this)">Position Book</button>
+    <button class="ntab" style="font-size:10px;opacity:.75;color:var(--cyan)" onclick="goTab('journal',this)">Journal</button>
   </div>
 
   <div class="tab-content">
@@ -367,6 +368,20 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
           </div>
         </div>
         <div style="position:relative;width:100%;height:280px"><canvas id="pf-chart" role="img" aria-label="Portfolio payoff diagram with breakeven lines"></canvas></div>
+        <!-- M2M CURVE SIMULATOR (v7g, feature from OptionsGo M2M Curve; joint vol-spot mode is ours) -->
+        <div id="m2m-panel" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0 2px;border-top:1px solid var(--border);margin-top:10px;font-size:11px">
+          <span style="color:#38bdf8;font-weight:700;text-transform:uppercase;letter-spacing:.05em;font-size:10px">M2M sim</span>
+          <span style="color:var(--text3)">T+</span>
+          <input type="range" id="m2m-days" min="0" max="60" step="1" value="0" oninput="m2mSlider()" style="width:110px;accent-color:#38bdf8">
+          <span id="m2m-days-lbl" class="mono" style="color:var(--text2);min-width:26px">0d</span>
+          <span style="color:var(--text3)">IV</span>
+          <input type="range" id="m2m-dvol" min="-15" max="15" step="0.5" value="0" oninput="m2mSlider()" style="width:110px;accent-color:#38bdf8">
+          <span id="m2m-dvol-lbl" class="mono" style="color:var(--text2);min-width:36px">+0.0</span>
+          <label style="display:flex;align-items:center;gap:4px;color:var(--text2);cursor:pointer" title="Link vol to spot move via VOLSPOT_BETA + SKEW_BETA along the curve (joint stress). IV slider then acts as an extra parallel shift.">
+            <input type="checkbox" id="m2m-joint" onchange="m2mSlider()" style="accent-color:#38bdf8">vol&#8592;spot &beta;</label>
+          <button class="btn btn-gh btn-sm" onclick="m2mReset()">Reset</button>
+          <span id="m2m-readout" class="mono" style="color:#38bdf8;margin-left:auto"></span>
+        </div>
         <!-- SUMMARY BAR -->
         <div id="summary-bar" style="display:flex;gap:20px;padding:9px 0 2px;border-top:1px solid var(--border);margin-top:10px;flex-wrap:wrap"></div>
         <!-- BREAKEVEN INFO -->
@@ -393,6 +408,21 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
             <tbody id="pos-tbody"><tr><td colspan="13" class="empty">No positions</td></tr></tbody>
           </table>
         </div>
+      </div>
+
+      <!-- ORDER TEXT / PASTE ORDERS (v7g: OptionsGo-style paste order + Order Text notation) -->
+      <div class="card" style="margin-bottom:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px">
+          <div class="ct" style="margin:0">Order Text — paste broker deals / share book</div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap">
+            <button class="btn btn-c btn-sm" onclick="otCopyBook()" title="Serialize current book to compact Order Text and copy to clipboard">Copy book as text</button>
+            <button class="btn btn-gh btn-sm" onclick="otClear()">Clear</button>
+            <button class="btn btn-g btn-sm" onclick="otParse()">Parse</button>
+          </div>
+        </div>
+        <textarea id="ot-input" rows="4" spellcheck="false" style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:4px;padding:7px 9px;font-size:11px;color:var(--text);font-family:'IBM Plex Mono',monospace;outline:none;resize:vertical"
+          placeholder="Paste broker deal summary rows or compact Order Text, e.g.&#10;S50U26C1040   Short   4   34.55        (broker row: symbol side vol avgPrice)&#10;-13 S50U26P910 @9.2308                  (compact: signedLots symbol @price)&#10;+7 S50Z26F @1013.77                     (futures: F suffix)"></textarea>
+        <div id="ot-preview" style="margin-top:8px"></div>
       </div>
 
       <!-- GREEKS SUMMARY -->
@@ -642,6 +672,17 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
 
     <!-- ══ BUTTERFLY / CONDOR ══ -->
     <div id="t-history" class="tpanel">
+      <!-- v7g: Fu / ATM IV / ATM straddle premium time series (OptionsGo-style daily charts) -->
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px">
+          <div class="ct" style="margin:0">Daily series — Fu / ATM IV / ATM straddle</div>
+          <select id="hc-series" onchange="renderHistCharts()" style="background:var(--bg4);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px;color:var(--text);font-family:'IBM Plex Mono',monospace;outline:none"></select>
+        </div>
+        <div style="position:relative;width:100%;height:120px;margin-bottom:6px"><canvas id="hc-fu"></canvas></div>
+        <div style="position:relative;width:100%;height:120px;margin-bottom:6px"><canvas id="hc-iv"></canvas></div>
+        <div style="position:relative;width:100%;height:120px"><canvas id="hc-prem"></canvas></div>
+        <div id="hc-note" style="font-size:10px;color:var(--text3);margin-top:6px"></div>
+      </div>
       <div class="card">
         <div class="ct">Saved market data <button class="btn btn-gh btn-sm" onclick="exportJSON()" style="margin-left:6px">Export JSON</button></div>
         <div id="hist-list"><div class="empty">No saved days</div></div>
@@ -774,6 +815,32 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
         <div class="ct">Closed trade P&amp;L summary</div>
         <div class="mrow" id="bk-pnl-met"></div>
         <div id="bk-closed-log" style="overflow-x:auto;margin-top:8px"></div>
+      </div>
+    </div>
+
+    <!-- ══ DAILY JOURNAL (v7g: DGS-style daily log) ══ -->
+    <div id="t-journal" class="tpanel">
+      <div class="card">
+        <div class="ct">Today's journal — <span id="jr-today" class="mono" style="text-transform:none"></span></div>
+        <div id="jr-auto" style="margin-bottom:8px"></div>
+        <div class="fr2" style="margin-bottom:8px">
+          <div class="fld"><label>มุมมองตลาด (market view)</label>
+            <textarea id="jr-view" style="background:var(--bg4);border:1px solid var(--border);border-radius:5px;padding:8px;font-size:11px;color:var(--text);font-family:'IBM Plex Mono',monospace;width:100%;min-height:70px;resize:vertical;outline:none;line-height:1.5" placeholder="e.g. SET50 sideways 1020-1040, vol crush after event, foreign flow negative..."></textarea></div>
+          <div class="fld"><label>แผน / สิ่งที่ทำวันนี้ (plan & actions)</label>
+            <textarea id="jr-plan" style="background:var(--bg4);border:1px solid var(--border);border-radius:5px;padding:8px;font-size:11px;color:var(--text);font-family:'IBM Plex Mono',monospace;width:100%;min-height:70px;resize:vertical;outline:none;line-height:1.5" placeholder="e.g. rolled 1040C to 1060C, kept short put ladder, watch 1015 support..."></textarea></div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-g" onclick="journalSave()">Save today's entry</button>
+          <span style="font-size:10px;color:var(--text3)">Auto-captures F, ATM straddle/IV, book Greeks, P&L and the book as Order Text. Saving again the same day overwrites that day's entry.</span>
+          <span id="jr-msg" style="font-size:11px;color:var(--green)"></span>
+        </div>
+      </div>
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px">
+          <div class="ct" style="margin:0">Past entries <span id="jr-count" style="font-size:10px;color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0;margin-left:4px"></span></div>
+          <button class="btn btn-c btn-sm" onclick="journalExport()">Export JSON</button>
+        </div>
+        <div id="jr-list"><div class="empty">No journal entries yet.</div></div>
       </div>
     </div>
 
@@ -1577,6 +1644,7 @@ function loadState(){
   try{var h=LS.getItem('s50_hist');if(h)histDB=JSON.parse(h);}catch(e){}
   try{var t=LS.getItem('s50_tfex');if(t)tfexTrades=JSON.parse(t);}catch(e){}
   try{var q=LS.getItem('s50_futq');if(q)futQuotes=JSON.parse(q)||{};}catch(e){} // v7d
+  try{var j=LS.getItem('s50_journal');if(j)journalDB=JSON.parse(j);}catch(e){} // v7g
 }
 function saveState(){
   try{LS.setItem('s50_legs',JSON.stringify(legs));}catch(e){}
@@ -2025,6 +2093,12 @@ function renderPayoff(){
   var beToday=findBreakevens(strikes,todayPL_);
   var curExpiry=dashTotalExpiry(S);
   var curToday=dashTotalToday(S);
+  // M2M sim curve (v7g)
+  m2mSyncRange();
+  var simOn=m2mActive();
+  var simPL=simOn?strikes.map(function(k){return dashTotalSim(k);}):null;
+  var beSim=simOn?findBreakevens(strikes,simPL):[];
+  var curSim=simOn?dashTotalSim(S):null;
   var maxP=expiryPL.reduce(function(a,b){return a>b?a:b;},-Infinity);
   var minP=expiryPL.reduce(function(a,b){return a<b?a:b;},Infinity);
   var stopPts=Math.min(Math.abs(premPts)*2,inp.cap/200);
@@ -2041,9 +2115,11 @@ function renderPayoff(){
   // CHART
   var strikesLocal=strikes,expiryLocal=expiryPL,todayLocal=todayPL_,pmLocal=payoffMode;
   var beEL=beExpiry,beTL=beToday,SL=S,spotE=curExpiry,spotT=curToday;
+  var simLocal=simPL,beSL=beSim,spotSim=curSim,simOnL=simOn;
   var datasets=[];
   if(pmLocal==='expiry'||pmLocal==='both') datasets.push({label:'At expiry',data:expiryPL,borderColor:'#00e59a',backgroundColor:'rgba(0,229,154,.06)',borderWidth:2,fill:pmLocal==='expiry',tension:0.25,pointRadius:0,pointHoverRadius:0});
   if(pmLocal==='today'||pmLocal==='both') datasets.push({label:'Today',data:todayPL_,borderColor:'#ffaa00',backgroundColor:'rgba(255,170,0,.05)',borderWidth:2,borderDash:pmLocal==='both'?[6,3]:[],fill:pmLocal==='today',tension:0.25,pointRadius:0,pointHoverRadius:0});
+  if(simOnL) datasets.push({label:'M2M sim',data:simPL,borderColor:'#38bdf8',borderWidth:2,borderDash:[2,3],fill:false,tension:0.25,pointRadius:0,pointHoverRadius:0});
   datasets.push({label:'_zero',data:strikes.map(function(){return 0;}),borderColor:'rgba(255,255,255,.1)',borderWidth:1,borderDash:[4,4],pointRadius:0,fill:false,tension:0});
   function rr(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.lineTo(x+w-r,y);c.quadraticCurveTo(x+w,y,x+w,y+r);c.lineTo(x+w,y+h-r);c.quadraticCurveTo(x+w,y+h,x+w-r,y+h);c.lineTo(x+r,y+h);c.quadraticCurveTo(x,y+h,x,y+h-r);c.lineTo(x,y+r);c.quadraticCurveTo(x,y,x+r,y);c.closePath();}
   var ovPlug={id:'beOv',
@@ -2052,9 +2128,11 @@ function renderPayoff(){
       function dot(strike,pl,col){var si=strikesLocal.reduce(function(b,k,i){return Math.abs(k-strike)<Math.abs(strikesLocal[b]-strike)?i:b;},0);var px=x.getPixelForValue(si),py=y.getPixelForValue(pl);c.save();c.beginPath();c.arc(px,py,7,0,Math.PI*2);c.fillStyle=col;c.fill();c.strokeStyle='#0c1019';c.lineWidth=2;c.stroke();c.restore();}
       if(pmLocal==='expiry'||pmLocal==='both') dot(SL,spotE,'#00e59a');
       if(pmLocal==='today'||pmLocal==='both') dot(SL,spotT,'#ffaa00');
+      if(simOnL) dot(SL,spotSim,'#38bdf8');
       function beLine(arr,col){arr.forEach(function(be){var bi=strikesLocal.reduce(function(b,k,i){return Math.abs(k-be)<Math.abs(strikesLocal[b]-be)?i:b;},0),bx=x.getPixelForValue(bi),zy=y.getPixelForValue(0);c.save();c.beginPath();c.moveTo(bx,ca.top);c.lineTo(bx,ca.bottom);c.strokeStyle=col;c.lineWidth=1;c.setLineDash([3,3]);c.stroke();c.beginPath();c.moveTo(bx,zy-7);c.lineTo(bx+6,zy);c.lineTo(bx,zy+7);c.lineTo(bx-6,zy);c.closePath();c.fillStyle=col;c.fill();c.strokeStyle='#0c1019';c.lineWidth=1;c.setLineDash([]);c.stroke();c.fillStyle=col;c.font='500 10px IBM Plex Mono,monospace';c.textAlign='center';c.fillText(be.toFixed(0),bx,ca.top+12);c.restore();});}
       if(pmLocal==='expiry'||pmLocal==='both') beLine(beEL,'#00e59a');
       if(pmLocal==='today'||pmLocal==='both') beLine(beTL,'#ffaa00');
+      if(simOnL) beLine(beSL,'#38bdf8');
     },
     afterDatasetsDraw:function(chart){
       var cx2=chart._cursorX;if(cx2==null)return;
@@ -2067,6 +2145,7 @@ function renderPayoff(){
         function hl(pl,col){var py=y.getPixelForValue(pl);c.beginPath();c.moveTo(ca.left,py);c.lineTo(ca.right,py);c.strokeStyle=col;c.lineWidth=0.5;c.setLineDash([2,4]);c.stroke();var txt='S:'+sk+' P/L:'+(pl>=0?'+':'')+pl.toFixed(1),tw=c.measureText(txt).width+16,tx=Math.min(cx2+10,ca.right-tw-4),ty=Math.max(ca.top+4,py-14);c.fillStyle='#0c1019';c.strokeStyle=col;c.lineWidth=1;c.setLineDash([]);c.beginPath();rr(c,tx,ty,tw,20,4);c.fill();c.stroke();c.fillStyle=col;c.font='500 10px IBM Plex Mono,monospace';c.textAlign='left';c.fillText(txt,tx+8,ty+13);}
         if(pmLocal==='expiry'||pmLocal==='both') hl(expiryLocal[idx],'#00e59a');
         if(pmLocal==='today'||pmLocal==='both') hl(todayLocal[idx],'#ffaa00');
+        if(simOnL) hl(simLocal[idx],'#38bdf8');
       }
       c.restore();
     }
@@ -2078,8 +2157,17 @@ function renderPayoff(){
   var bi='';
   if(beExpiry.length) bi+='<span style="color:var(--green)">Expiry BEP: '+beExpiry.map(function(b){return b.toFixed(0);}).join(' / ')+'</span> ';
   if((pmLocal==='today'||pmLocal==='both')&&beToday.length) bi+='<span style="color:var(--amber);margin-left:8px">Today BEP: '+beToday.map(function(b){return b.toFixed(0);}).join(' / ')+'</span>';
+  if(simOn&&beSim.length) bi+='<span style="color:#38bdf8;margin-left:8px">Sim BEP: '+beSim.map(function(b){return b.toFixed(0);}).join(' / ')+'</span>';
   if(!bi) bi='<span style="color:var(--text3)">No breakeven in range</span>';
   document.getElementById('breakeven-info').innerHTML=bi;
+  // M2M sim readout
+  var ro=document.getElementById('m2m-readout');
+  if(ro){
+    if(simOn){
+      var d0=curSim-curToday;
+      ro.textContent='T+'+m2mSim.days+'d IV'+(m2mSim.dvol>=0?'+':'')+m2mSim.dvol.toFixed(1)+(m2mSim.joint?' \u03b2':'')+' @'+Math.round(S)+': '+fc(+curSim.toFixed(1))+' pts ('+fb(curSim*200)+') \u0394vs today '+fc(+d0.toFixed(1));
+    } else ro.textContent='';
+  }
   // SUMMARY BAR
   var g=portG();
   document.getElementById('summary-bar').innerHTML=[
@@ -2152,6 +2240,264 @@ function dashTotalToday(Sp){
     var Ft=tfexFutPrice(t.series,Sp,inp);
     return s+(t.dir==='long'?(Ft-t.price)*t.lots:(t.price-Ft)*t.lots);},0);
   return op+tp;
+}
+
+// ── M2M CURVE SIMULATOR (v7g) ───────────────────────────────────
+// Simulated mark-to-market curve: reprice every active leg with
+// dte-m2mSim.days and per-strike smile vol + m2mSim.dvol (parallel shift).
+// joint=true additionally moves vol with the spot scan via VOLSPOT_BETA
+// (per series) + SKEW_BETA on downside puts — same model as bookValueJoint,
+// so the curve bends the way a real risk-off does instead of holding IV flat.
+// TFEX legs are linear (no theta/vega) — unchanged by days/vol, like dashTotalToday.
+var m2mSim={days:0,dvol:0,joint:false};
+function m2mActive(){return m2mSim.days>0||Math.abs(m2mSim.dvol)>=0.25||m2mSim.joint;}
+function dashTotalSim(Sp){
+  initDashActiveSet();var inp=gi();var flatSig=inp.iv/100;
+  var movePct=(Sp-inp.S)/inp.S*100;
+  var op=legs.reduce(function(s,l){if(!dashActiveSet.has('opt_'+l.id))return s;
+    var ser=l.series||'S50M26';
+    var Fp=legFutPrice(l,Sp,inp);
+    // Basis decay: futures basis (F-S) shrinks linearly to 0 at that leg's expiry.
+    // legFutPrice keeps basis proportional (fine for t=0 curves); a time simulator
+    // must converge F -> S as remaining dte -> 0, else T+full-dte != expiry payoff.
+    var rem=Math.max(l.dte-m2mSim.days,0);
+    if(l.dte>0&&rem<l.dte) Fp=Sp+(Fp-Sp)*(rem/l.dte);
+    var sigPts=getSmileSigma(l.K,l.type,flatSig,ser)*100+m2mSim.dvol;
+    if(m2mSim.joint){
+      var beta=(VOLSPOT_BETA[ser]!==undefined?VOLSPOT_BETA[ser]:VOLSPOT_BETA._default);
+      sigPts+=beta*movePct;                      // down move (movePct<0) -> +vol
+      if(movePct<0&&l.type==='put'&&l.K<Fp) sigPts+=SKEW_BETA*(-movePct); // skew steepening
+    }
+    var sig=Math.max(sigPts,3)/100;              // 3-pt floor, same convention as bookValueJoint
+    return s+l.ls*(bsp(Fp,l.K,rem/365,0,sig,l.type)-l.prem)*l.lots;
+  },0);
+  var tp=tfexTrades.reduce(function(s,t){if(!dashActiveSet.has('tfex_'+t.id))return s;
+    var Ft=tfexFutPrice(t.series,Sp,inp);
+    return s+(t.dir==='long'?(Ft-t.price)*t.lots:(t.price-Ft)*t.lots);},0);
+  return op+tp;
+}
+var _m2mRaf=null;
+function m2mSlider(){
+  var d=document.getElementById('m2m-days'),v=document.getElementById('m2m-dvol'),j=document.getElementById('m2m-joint');
+  if(!d)return;
+  m2mSim.days=+d.value||0;m2mSim.dvol=+v.value||0;m2mSim.joint=!!(j&&j.checked);
+  document.getElementById('m2m-days-lbl').textContent=m2mSim.days+'d';
+  document.getElementById('m2m-dvol-lbl').textContent=(m2mSim.dvol>=0?'+':'')+m2mSim.dvol.toFixed(1);
+  if(_m2mRaf)return;
+  _m2mRaf=requestAnimationFrame(function(){_m2mRaf=null;renderPayoff();});
+}
+function m2mReset(){
+  var d=document.getElementById('m2m-days'),v=document.getElementById('m2m-dvol'),j=document.getElementById('m2m-joint');
+  if(d)d.value=0;if(v)v.value=0;if(j)j.checked=false;
+  m2mSlider();
+}
+// Keep the T+ slider range meaningful: cap at the longest active-leg DTE.
+function m2mSyncRange(){
+  var d=document.getElementById('m2m-days');if(!d)return;
+  var maxD=legs.reduce(function(m,l){return Math.max(m,l.dte||0);},0)||60;
+  d.max=Math.max(1,maxD);
+  if(+d.value>maxD){d.value=maxD;m2mSim.days=maxD;var lb=document.getElementById('m2m-days-lbl');if(lb)lb.textContent=maxD+'d';}
+}
+
+// ── ORDER TEXT: parse / preview / apply / export (v7g) ──────────
+// Two accepted shapes per line:
+//   compact : "-13 S50U26P910 @9.2308"          signedLots symbol @price ("F" suffix or bare series = futures)
+//   broker  : "S50U26P910  Short  13  9.2308"   symbol, side word (Long/Short/Buy/Sell/B/S/ซื้อ/ขาย), vol, avg price
+// Lines starting with # are comments. Same instrument+side rows merge with
+// volume-weighted avg price (what a broker "Total Deal Summary" already is).
+// Nothing touches the book until the user clicks Apply on the preview.
+var otRows=[];
+function otNorm(s){return s.replace(/(\d),(?=\d{3}\b)/g,'');} // strip thousands commas
+function otParseLine(raw){
+  raw=raw.trim();
+  if(!raw||/^#/.test(raw))return null;
+  var u=otNorm(raw).toUpperCase();
+  var kind,series,type=null,K=null,warn=[];
+  var m=u.match(/S50\s*([FGHJKMNQUVXZ])\s*(\d{2})\s*([CP])\s*(\d{3,4}(?:\.\d+)?)/);
+  if(m){kind='opt';series='S50'+m[1]+m[2];type=m[3]==='C'?'call':'put';K=+m[4];}
+  else{
+    var mf=u.match(/S50\s*([FGHJKMNQUVXZ])\s*(\d{2})\s*F?(?=\s|$|@)/);
+    if(!mf)return{err:'no S50 symbol found',raw:raw};
+    kind='fut';series='S50'+mf[1]+mf[2];
+  }
+  var symTxt=(m||u.match(/S50\s*[FGHJKMNQUVXZ]\s*\d{2}\s*F?/))[0];
+  var side=0,lots=null,price=null;
+  var mc=u.match(/^([+-])\s*(\d+)\b/);                     // compact: leading signed lots
+  var mp=u.match(/@\s*(\d+(?:\.\d+)?)/);                   // compact: @price
+  if(mc&&mp){
+    side=mc[1]==='-'?-1:1;lots=+mc[2];price=+mp[1];
+  }else{
+    var rest=u.replace(symTxt,' ');
+    var toks=rest.split(/[\s\t]+/).filter(function(t){return t!=='';});
+    var nums=[];
+    toks.forEach(function(t){
+      if(side===0){
+        if(t==='LONG'||t==='BUY'||t==='L'||t==='B'||raw.indexOf('ซื้อ')>=0){side=1;if(t==='LONG'||t==='BUY'||t==='L'||t==='B')return;}
+        else if(t==='SHORT'||t==='SELL'||t==='S'||raw.indexOf('ขาย')>=0){side=-1;if(t==='SHORT'||t==='SELL'||t==='S')return;}
+      }
+      if(/^[+-]?\d+(?:\.\d+)?$/.test(t))nums.push(+t);
+    });
+    if(side===0)return{err:'no side (Long/Short/Buy/Sell) found',raw:raw};
+    if(nums.length<2)return{err:'need volume + price on the line',raw:raw};
+    lots=Math.abs(nums[0]);price=nums[1];
+    if(nums[0]%1!==0)warn.push('vol not integer — check column order');
+    if(nums.length>2)warn.push('extra numbers ignored — verify vol/price picked correctly');
+  }
+  if(!lots||lots<=0)return{err:'volume is zero',raw:raw};
+  if(!(price>0))return{err:'price must be > 0',raw:raw};
+  if(kind==='opt'&&K%5!==0)warn.push('strike '+K+' not on 5-pt grid');
+  var dte=seriesDTE(series);
+  if(dte===null){warn.push('unknown expiry for '+series+' — using sidebar DTE');dte=gi().dte;}
+  return{kind:kind,series:series,type:type,K:K,side:side,lots:lots,price:price,dte:dte,raw:raw,warn:warn};
+}
+function otParse(){
+  var raw=document.getElementById('ot-input').value;
+  var errs=[],map={},order=[];
+  raw.split(/\r?\n/).forEach(function(line){
+    var r=otParseLine(line);
+    if(!r)return;
+    if(r.err){errs.push(r);return;}
+    var key=r.kind+'|'+r.series+'|'+(r.type||'')+'|'+(r.K||'')+'|'+r.side;
+    if(map[key]){var a=map[key];a.price=(a.price*a.lots+r.price*r.lots)/(a.lots+r.lots);a.lots+=r.lots;a.warn=a.warn.concat(r.warn);a.merged=true;}
+    else{map[key]=r;order.push(key);}
+  });
+  otRows=order.map(function(k){return map[k];});
+  var el=document.getElementById('ot-preview');
+  if(!otRows.length&&!errs.length){el.innerHTML='<div class="alert al-a">Nothing to parse.</div>';return;}
+  var h='';
+  if(otRows.length){
+    h+='<table class="tbl" style="font-size:11px"><thead><tr><th>Instrument</th><th>L/S</th><th>Lots</th><th>Avg price</th><th>DTE</th><th>Status</th></tr></thead><tbody>';
+    otRows.forEach(function(r){
+      var name=r.kind==='opt'?r.series+(r.type==='call'?'C':'P')+r.K:r.series+' futures';
+      h+='<tr><td class="mono">'+name+'</td>'+
+         '<td style="color:'+(r.side>0?'var(--green)':'var(--red)')+'">'+(r.side>0?'LONG':'SHORT')+'</td>'+
+         '<td class="mono">'+r.lots+(r.merged?' <span style="color:var(--text3)" title="merged from multiple fills, volume-weighted price">Σ</span>':'')+'</td>'+
+         '<td class="mono">'+(+r.price.toFixed(4))+'</td>'+
+         '<td class="mono">'+r.dte+'</td>'+
+         '<td style="color:'+(r.warn.length?'var(--amber)':'var(--green)')+';font-size:10px">'+(r.warn.length?r.warn.join('; '):'OK')+'</td></tr>';
+    });
+    h+='</tbody></table>';
+  }
+  errs.forEach(function(e){h+='<div class="alert al-r" style="margin-top:5px">SKIPPED: '+e.err+' — <span class="mono">'+e.raw.replace(/</g,'&lt;')+'</span></div>';});
+  if(otRows.length){
+    h+='<div style="display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap">'+
+       '<button class="btn btn-g btn-sm" onclick="otApply(false)">Append to book</button>'+
+       '<button class="btn btn-a btn-sm" onclick="otApply(true)">Replace book</button>'+
+       '<span style="font-size:10px;color:var(--text3)">Replace clears current option legs + futures trades first. Premiums = pasted prices (your fills, not model).</span></div>';
+  }
+  el.innerHTML=h;
+}
+function otApply(replace){
+  if(!otRows.length)return;
+  if(replace&&!confirm('Replace ENTIRE book (options + futures) with the parsed rows?'))return;
+  if(replace){legs=[];tfexTrades=[];}
+  var t=Date.now(),today=new Date().toISOString().slice(0,10);
+  var nOpt=0,nFut=0;
+  otRows.forEach(function(r,i){
+    if(r.kind==='opt'){legs.push({type:r.type,ls:r.side,K:r.K,dte:r.dte,lots:r.lots,prem:+r.price.toFixed(4),series:r.series,id:t+i});nOpt++;}
+    else{tfexTrades.push({id:t+i,date:today,series:r.series,dir:r.side>0?'long':'short',lots:r.lots,price:+r.price.toFixed(4),note:'Order Text import',action:'open'});nFut++;}
+  });
+  otRows=[];dashActiveSet=null;autoSave();ua();
+  document.getElementById('ot-preview').innerHTML='<div class="alert al-g">Applied: '+nOpt+' option leg(s), '+nFut+' futures trade(s)'+(replace?' (book replaced)':'')+'.</div>';
+}
+function otClear(){document.getElementById('ot-input').value='';document.getElementById('ot-preview').innerHTML='';otRows=[];}
+function otBookText(){
+  var inp=gi();
+  var lines=['# SET50 Desk book '+new Date().toISOString().slice(0,10)+' S='+inp.S+' F='+inp.fut];
+  legs.forEach(function(l){
+    lines.push((l.ls>0?'+':'-')+l.lots+' '+(l.series||'S50M26')+(l.type==='call'?'C':'P')+l.K+' @'+l.prem);
+  });
+  tfexTrades.forEach(function(tr){
+    lines.push((tr.dir==='long'?'+':'-')+tr.lots+' '+tr.series+'F @'+tr.price);
+  });
+  return lines.join('\n');
+}
+// ── DAILY JOURNAL (v7g, DGS-style) ──────────────────────────────
+// One entry per calendar day, upserted. Auto-captures the market + book
+// numbers at save time; the two text fields are the human part. Persisted
+// under s50_journal so the LS wrapper's cloud dirty-queue syncs it like
+// legs/hist/tfex.
+var journalDB=[];
+function journalTodayISO(){return new Date().toISOString().slice(0,10);}
+function journalSaveDB(){try{LS.setItem('s50_journal',JSON.stringify(journalDB));}catch(e){}}
+function journalCapture(){
+  var inp=gi();var g=portG();
+  var atm=null;
+  var lc=lastChain&&lastChain();
+  if(lc){var st=histAtmStats(lc);if(st)atm={series:lc.series,K:st.K,straddle:+st.straddle.toFixed(2),iv:+st.iv.toFixed(2),chainDate:lc.date};}
+  return{
+    spot:inp.S,fut:inp.fut,ivInput:inp.iv,ivr:inp.ivr,
+    atm:atm,
+    book:{legsN:legs.length,futTrades:tfexTrades.length,
+      premPts:+totalPrem().toFixed(2),pnlPts:+portPnLOpts(inp.S).toFixed(2),
+      delta:+g.D.toFixed(3),theta:+g.Th.toFixed(3),gamma:+g.G.toFixed(4),vegaBySeries:g.VeBySeries},
+    bookText:otBookText()
+  };
+}
+function journalSave(){
+  var d=journalTodayISO();
+  var view=document.getElementById('jr-view').value.trim();
+  var plan=document.getElementById('jr-plan').value.trim();
+  var entry=Object.assign({date:d,view:view,plan:plan,savedAt:new Date().toISOString()},journalCapture());
+  var i=journalDB.findIndex(function(e){return e.date===d;});
+  if(i>=0)journalDB[i]=entry;else journalDB.unshift(entry);
+  journalDB.sort(function(a,b){return b.date.localeCompare(a.date);});
+  journalSaveDB();renderJournal();
+  var m=document.getElementById('jr-msg');if(m){m.textContent='Saved '+d;setTimeout(function(){m.textContent='';},2500);}
+}
+function journalDel(date){
+  if(!confirm('Delete journal entry '+date+'?'))return;
+  journalDB=journalDB.filter(function(e){return e.date!==date;});
+  journalSaveDB();renderJournal();
+}
+function journalStatsLine(e){
+  var s='F '+e.fut+' · book '+e.book.legsN+' legs';
+  if(e.book.futTrades)s+=' + '+e.book.futTrades+' fut';
+  s+=' · prem '+fc(e.book.premPts)+' · P&L '+fc(e.book.pnlPts)+' pts · Δ '+fc(e.book.delta,2)+' · θ '+fc(e.book.theta,2);
+  if(e.atm)s+=' · '+e.atm.series+' ATM '+e.atm.K+' strdl '+e.atm.straddle+' (IV '+e.atm.iv+'%'+(e.atm.chainDate!==e.date?', chain '+e.atm.chainDate:'')+')';
+  return s;
+}
+function renderJournal(){
+  var t=document.getElementById('jr-today');if(t)t.textContent=journalTodayISO();
+  // auto-stats preview for today
+  var au=document.getElementById('jr-auto');
+  if(au){
+    try{var cap=journalCapture();
+      au.innerHTML='<div class="alert al-c" style="font-size:11px">'+journalStatsLine(Object.assign({date:journalTodayISO(),fut:cap.fut},cap)).replace(/</g,'&lt;')+'</div>';
+    }catch(e){au.innerHTML='';}
+  }
+  // prefill today's entry if it exists
+  var today=journalDB.find(function(e){return e.date===journalTodayISO();});
+  var v=document.getElementById('jr-view'),p=document.getElementById('jr-plan');
+  if(today){if(v&&!v.value)v.value=today.view||'';if(p&&!p.value)p.value=today.plan||'';}
+  var el=document.getElementById('jr-list');if(!el)return;
+  var cn=document.getElementById('jr-count');if(cn)cn.textContent=journalDB.length?journalDB.length+' days':'';
+  if(!journalDB.length){el.innerHTML='<div class="empty">No journal entries yet.</div>';return;}
+  el.innerHTML=journalDB.map(function(e){
+    var esc=function(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');};
+    return '<div style="border:1px solid var(--border);border-radius:6px;padding:9px 11px;margin-bottom:8px;background:var(--bg3,transparent)">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">'+
+      '<span class="mono" style="font-size:12px;font-weight:700;color:var(--cyan)">'+e.date+'</span>'+
+      '<button class="btn btn-r btn-sm" onclick="journalDel(\''+e.date+'\')">X</button></div>'+
+      '<div class="mono" style="font-size:10px;color:var(--text2);margin-top:4px">'+esc(journalStatsLine(e))+'</div>'+
+      (e.view?'<div style="font-size:11px;margin-top:6px;color:var(--text)"><span style="color:var(--text3)">View:</span> '+esc(e.view)+'</div>':'')+
+      (e.plan?'<div style="font-size:11px;margin-top:3px;color:var(--text)"><span style="color:var(--text3)">Plan:</span> '+esc(e.plan)+'</div>':'')+
+      (e.bookText?'<details style="margin-top:5px"><summary style="font-size:10px;color:var(--text3);cursor:pointer">book as Order Text</summary><pre class="mono" style="font-size:10px;color:var(--text2);white-space:pre-wrap;margin:4px 0 0">'+esc(e.bookText)+'</pre></details>':'')+
+      '</div>';
+  }).join('');
+}
+function journalExport(){
+  var blob=new Blob([JSON.stringify(journalDB,null,2)],{type:'application/json'});
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='set50_journal_'+journalTodayISO()+'.json';a.click();
+}
+
+function otCopyBook(){
+  var txt=otBookText();
+  document.getElementById('ot-input').value=txt;
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(function(){},function(){});
+  var el=document.getElementById('ot-preview');
+  el.innerHTML='<div class="alert al-g">Book serialized ('+legs.length+' legs, '+tfexTrades.length+' futures trades) — copied to clipboard. Round-trips through Parse.</div>';
 }
 
 function findBreakevens(strikes,vals){
@@ -2892,7 +3238,100 @@ function renderHist(){
   var opts=histDB.map(function(h,i){return'<option value="'+i+'">'+h.date+' '+h.series+'</option>';}).join('');
   document.getElementById('cmp-a').innerHTML='<option value="">Select...</option>'+opts;
   document.getElementById('cmp-b').innerHTML='<option value="">Select...</option>'+opts;
+  renderHistCharts();
 }
+// ── DAILY SERIES CHARTS: Fu / ATM IV / ATM straddle premium (v7g) ──
+// One point per saved chain snapshot. ATM = strike nearest F with usable
+// call+put mids. ATM IV uses the same straddle approximation as updateIVR:
+// IV = (straddle/F)/sqrt(2/pi*T). RV line = realized vol from snapshot-to-
+// snapshot futures log returns, each normalized by sqrt(gap days) then
+// annualized — only drawn when >=21 snapshots exist (true RV20), else omitted.
+var histCharts={};
+function histDteAt(series,dateISO){
+  var d=seriesExpiry(series);if(!d||!dateISO)return null;
+  var t=new Date(dateISO+'T00:00:00');
+  return Math.max(0,Math.round((d.getTime()-t.getTime())/86400000)+1); // same +1 convention as seriesDTE
+}
+function histRowMid(r){
+  if(!r)return null;
+  if(r.bid>0&&r.offer>0)return (r.bid+r.offer)/2;
+  if(r.bid>0)return r.bid;
+  if(r.last>0)return r.last;
+  return null;
+}
+function histAtmStats(h){
+  if(!h.rows||!h.rows.length||!h.fut)return null;
+  var F=h.fut;
+  var strikes={};
+  h.rows.forEach(function(r){var s=strikes[r.strike]=strikes[r.strike]||{};s[r.type]=r;});
+  var best=null;
+  Object.keys(strikes).forEach(function(k){
+    var cM=histRowMid(strikes[k].call),pM=histRowMid(strikes[k].put);
+    if(cM===null||pM===null)return;
+    var dist=Math.abs(+k-F);
+    if(!best||dist<best.dist)best={dist:dist,K:+k,straddle:cM+pM};
+  });
+  if(!best)return null;
+  var dte=histDteAt(h.series,h.date);
+  var T=(dte!==null?Math.max(dte,1):30)/365;
+  var iv=((best.straddle/F)/Math.sqrt(2/Math.PI*T))*100;
+  return{date:h.date,F:F,K:best.K,straddle:best.straddle,iv:iv,dte:dte};
+}
+function renderHistCharts(){
+  var sel=document.getElementById('hc-series');if(!sel)return;
+  var seriesList=[];histDB.forEach(function(h){if(h.series&&h.rows&&h.rows.length&&seriesList.indexOf(h.series)<0)seriesList.push(h.series);});
+  var cur=sel.value;
+  sel.innerHTML=seriesList.map(function(s){return '<option value="'+s+'">'+s+'</option>';}).join('');
+  if(seriesList.indexOf(cur)>=0)sel.value=cur; else if(seriesList.length)sel.value=seriesList[0];
+  var series=sel.value;
+  var note=document.getElementById('hc-note');
+  var pts=histDB.filter(function(h){return h.series===series;}).map(histAtmStats).filter(function(x){return x!==null;})
+    .sort(function(a,b){return a.date.localeCompare(b.date);});
+  // de-dup same date (keep last saved)
+  var seen={},uniq=[];pts.forEach(function(p){if(seen[p.date]!==undefined)uniq[seen[p.date]]=p;else{seen[p.date]=uniq.length;uniq.push(p);}});
+  pts=uniq;
+  ['fu','iv','prem'].forEach(function(k){if(histCharts[k]){histCharts[k].destroy();histCharts[k]=null;}});
+  if(pts.length<2){if(note)note.textContent=series?('Need >=2 saved chain days for '+series+' (have '+pts.length+'). Import + Save chains daily to build this.'):'No chain snapshots saved yet.';return;}
+  // RV from futures log returns normalized by gap days
+  var rv=new Array(pts.length).fill(null);
+  var rets=[];
+  for(var i=1;i<pts.length;i++){
+    var gap=Math.max(1,Math.round((new Date(pts[i].date)-new Date(pts[i-1].date))/86400000));
+    rets.push(Math.log(pts[i].F/pts[i-1].F)/Math.sqrt(gap));
+  }
+  var RVWIN=20;
+  if(rets.length>=RVWIN){
+    for(var j=RVWIN;j<=rets.length;j++){
+      var w=rets.slice(j-RVWIN,j);
+      var mu=w.reduce(function(a,b){return a+b;},0)/w.length;
+      var va=w.reduce(function(a,b){return a+(b-mu)*(b-mu);},0)/(w.length-1);
+      rv[j]=Math.sqrt(va*252)*100; // rv[j] aligns with pts[j] (return j uses pts j-1->j)
+    }
+  }
+  var labels=pts.map(function(p){return p.date.slice(5);});
+  function mkChart(id,datasets,fmt){
+    return new Chart(document.getElementById(id),{type:'line',data:{labels:labels,datasets:datasets},
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:true,labels:{color:'#8899bb',boxWidth:14,font:{size:9}}},
+          tooltip:{callbacks:{label:function(c){return c.dataset.label+': '+(c.parsed.y===null?'—':(+c.parsed.y).toFixed(2)+(fmt||''));}}}},
+        scales:{x:{grid:{color:'rgba(26,40,64,.7)'},ticks:{color:'#304060',maxTicksLimit:10,font:{size:9,family:'IBM Plex Mono'}},border:{color:'#1a2840'}},
+                y:{grid:{color:'rgba(26,40,64,.7)'},ticks:{color:'#304060',font:{size:9,family:'IBM Plex Mono'}},border:{color:'#1a2840'}}},
+        animation:{duration:200}}});
+  }
+  histCharts.fu=mkChart('hc-fu',[{label:series+' futures',data:pts.map(function(p){return p.F;}),borderColor:'#44aaff',backgroundColor:'rgba(68,170,255,.07)',borderWidth:2,fill:true,tension:0.2,pointRadius:2}]);
+  var ivDs=[{label:'ATM IV % (straddle approx)',data:pts.map(function(p){return +p.iv.toFixed(2);}),borderColor:'#ffaa00',borderWidth:2,fill:false,tension:0.2,pointRadius:2}];
+  if(rets.length>=RVWIN)ivDs.push({label:'RV20 %',data:rv.map(function(v){return v===null?null:+v.toFixed(2);}),borderColor:'#b478ff',borderWidth:2,borderDash:[5,3],fill:false,tension:0.2,pointRadius:0,spanGaps:false});
+  histCharts.iv=mkChart('hc-iv',ivDs);
+  histCharts.prem=mkChart('hc-prem',[{label:'ATM straddle (pts)',data:pts.map(function(p){return +p.straddle.toFixed(2);}),borderColor:'#00e59a',backgroundColor:'rgba(0,229,154,.07)',borderWidth:2,fill:true,tension:0.2,pointRadius:2}]);
+  if(note){
+    var last=pts[pts.length-1];
+    var vrp='';
+    if(rets.length>=RVWIN){var lastRv=rv[pts.length-1];if(lastRv!=null)vrp=' · VRP now: '+(last.iv-lastRv>=0?'+':'')+(last.iv-lastRv).toFixed(1)+' pts (ATM IV − RV20)';}
+    else vrp=' · RV20 needs >=21 snapshots (have '+pts.length+')';
+    note.textContent=pts.length+' snapshot days · last '+last.date+': F '+last.F+', ATM '+last.K+' straddle '+last.straddle.toFixed(1)+' pts, IV '+last.iv.toFixed(1)+'%'+vrp;
+  }
+}
+
 function loadHistEntry(i){var h=histDB[i];document.getElementById('i-spot').value=h.spot;document.getElementById('i-fut').value=h.fut;buildSmile(h);renderChainReal(h);document.getElementById('chain-lbl').textContent=h.series+' - '+h.date;ua();}
 function delHist(i){if(confirm('Delete this day?')){histDB.splice(i,1);saveState();renderHist();}}
 function renderCmp(){
@@ -3013,6 +3452,7 @@ function ua(){
   else if(id==='strategy')renderStrat();
   else if(id==='diagnostics')renderDiagnostics();
   else if(id==='book')bookRender();
+  else if(id==='journal')renderJournal();
 }
 
 // Duplicate Greeks to payoff tab
