@@ -2598,28 +2598,57 @@ function piPoll(){
     if(piState.fail>=5){piDisconnect();piMsg('หลุดการเชื่อมต่อ — connector ปิด?',false);}
   });
 }
+// Which option series to pull: the box value if the user set one, else every
+// active quarterly (front + next) so both S50U26 and S50Z26 come in together.
+function piOptionSeries(){
+  var typed=(_piVal('im-series')||'').toUpperCase();
+  if(typed)return [typed];
+  var out=[],today=new Date(),y=today.getFullYear(),mo=today.getMonth()+1;
+  var Q={3:'H',6:'M',9:'U',12:'Z'};
+  var yy=y,mm=mo;
+  while(out.length<2){
+    if(Q[mm]&&(yy>y||(yy===y&&mm>=mo)))out.push('S50'+Q[mm]+String(yy).slice(2));
+    mm++;if(mm>12){mm=1;yy++;}
+  }
+  return out;
+}
 function piPullChain(){
-  var series=(_piVal('im-series')||getDefaultSeries()).toUpperCase();
-  piMsg('pulling chain '+series+'…');
-  fetch(piUrl()+'/chain/'+series).then(function(r){return r.json();}).then(function(c){
-    if(!c.rows||!c.rows.length)throw new Error(c.error||'no rows');
-    importRows=c.rows;
-    var set=function(id,v){var el=document.getElementById(id);if(el)el.value=v;};
-    set('im-series',series);set('im-date',c.date);set('im-fut',c.fut);
-    var sp=(window.piLastSet50>0)?window.piLastSet50:c.fut;
-    var spEl=document.getElementById('im-spot');if(spEl&&!(+spEl.value>0))spEl.value=sp;
-    if(typeof onImSeriesChange==='function')onImSeriesChange();
-    saveImport();
-    var msg=document.getElementById('im-msg');
-    if(msg)msg.innerHTML='<div class="alert al-g">Pi live chain '+series+' — '+c.rows.length+' rows saved as '+c.date+(c.time?' @'+c.time:'')+(c.mode==='mock'?' (MOCK)':'')+'. QC/smile ทำงานตามปกติ</div>';
-    piMsg('chain '+series+' saved',true);
-  }).catch(function(e){piMsg('chain fail: '+e.message,false);});
+  var list=piOptionSeries();
+  var done=0,okN=0,msgs=[];
+  piMsg('pulling '+list.length+' chain(s)…');
+  function next(i){
+    if(i>=list.length){
+      var msg=document.getElementById('im-msg');
+      if(msg)msg.innerHTML='<div class="alert '+(okN?'al-g':'al-r')+'">Pi live chain: '+msgs.join(' · ')+'</div>';
+      piMsg(okN?('chains saved: '+okN+'/'+list.length):'chain pull failed',okN>0);
+      return;
+    }
+    var series=list[i];
+    fetch(piUrl()+'/chain/'+series).then(function(r){return r.json();}).then(function(c){
+      if(c.error)throw new Error(c.error);
+      if(!c.rows||!c.rows.length)throw new Error('0 rows (scanned '+(c.scanned||'?')+')');
+      importRows=c.rows;
+      var set=function(id,v){var el=document.getElementById(id);if(el)el.value=v;};
+      set('im-series',series);set('im-date',c.date);set('im-fut',c.fut);
+      var sp=(window.piLastSet50>0)?window.piLastSet50:c.fut;
+      var spEl=document.getElementById('im-spot');if(spEl)spEl.value=sp;
+      if(typeof onImSeriesChange==='function')onImSeriesChange();
+      saveImport();
+      okN++;msgs.push(series+' '+c.rows.length+'r'+(c.mode==='mock'?'(MOCK)':''));
+    }).catch(function(e){
+      msgs.push(series+' ✗ '+e.message);
+    }).then(function(){next(i+1);});
+  }
+  next(0);
 }
 function piSyncPositions(){
   piMsg('pulling positions…');
   fetch(piUrl()+'/portfolio').then(function(r){return r.json();}).then(function(p){
     if(p.error)throw new Error(p.error);
-    if(!p.positions||!p.positions.length)throw new Error('no S50 positions in account');
+    if(!p.positions||!p.positions.length){
+      var extra=(p.raw_count?(' (got '+p.raw_count+' rows but none matched S50 — run /debug to check SDK shape)'):' (account empty or not logged in)');
+      throw new Error('no S50 positions'+extra);
+    }
     var txt='# Pi positions '+new Date().toISOString().slice(0,10)+(p.mode==='mock'?' (MOCK)':'')+'\n'+
       p.positions.map(function(x){return x.orderText;}).join('\n');
     var ot=document.getElementById('ot-input');
@@ -3470,7 +3499,7 @@ function renderHistCharts(){
 // NOTE: "vol" units are a house convention (proven not derivable from close
 // data). Treat as a RELATIVE regime indicator only.
 /*PDGS_DATA_START*/
-var PDGS_DATA={"updated":"2026-07-17","days":[{"date":"2026-07-17","series":"S50Z26","fu":1088.4,"vol":0.354,"totalPre":82.4,"volRange":[0.322,0.415],"morningAvg":0.357,"afternoonAvg":0.351,"close":0.367,"closePos":"mid","daysLeft":165},{"date":"2026-07-17","series":"S50U26","fu":1088.7,"vol":0.556,"totalPre":52.0,"volRange":[0.512,0.586],"morningAvg":0.536,"afternoonAvg":0.573,"close":0.585,"closePos":"near high","daysLeft":74},{"date":"2026-07-16","series":"S50Z26","fu":1081.9,"vol":0.354,"totalPre":82.1,"volRange":[0.313,0.445],"morningAvg":0.378,"afternoonAvg":0.332,"close":0.315,"closePos":"near low"},{"date":"2026-07-16","series":"S50U26","fu":1082.4,"vol":0.532,"totalPre":53.0,"volRange":[0.502,0.587],"morningAvg":0.552,"afternoonAvg":0.515,"close":0.503,"closePos":"near low"},{"date":"2026-07-15","series":"S50Z26","fu":1072.6,"vol":0.413,"totalPre":86.6,"volRange":[0.376,0.495],"morningAvg":0.433,"afternoonAvg":0.394,"close":0.4,"closePos":"near low"},{"date":"2026-07-15","series":"S50U26","fu":1073.0,"vol":0.604,"totalPre":53.8,"volRange":[0.588,0.625],"morningAvg":0.612,"afternoonAvg":0.597,"close":0.591,"closePos":"near low"},{"date":"2026-07-14","series":"S50Z26","fu":1069.4,"vol":0.407,"totalPre":86.7,"volRange":[0.392,0.441],"morningAvg":0.411,"afternoonAvg":0.404,"close":0.413,"closePos":"mid"},{"date":"2026-07-14","series":"S50U26","fu":1070.0,"vol":0.613,"totalPre":56.9,"volRange":[0.589,0.624],"morningAvg":0.613,"afternoonAvg":0.614,"close":0.62,"closePos":"near high"},{"date":"2026-07-13","series":"S50Z26","fu":1071.5,"vol":0.369,"totalPre":87.2,"volRange":[0.333,0.404],"morningAvg":0.36,"afternoonAvg":0.376,"close":0.371,"closePos":"mid"},{"date":"2026-07-13","series":"S50U26","fu":1072.3,"vol":0.566,"totalPre":58.6,"volRange":[0.513,0.607],"morningAvg":0.539,"afternoonAvg":0.589,"close":0.589,"closePos":"near high"},{"date":"2026-07-10","series":"S50Z26","fu":1065.3,"vol":0.345,"totalPre":87.1,"volRange":[0.308,0.444],"morningAvg":0.371,"afternoonAvg":0.32,"close":0.327,"closePos":"near low"},{"date":"2026-07-10","series":"S50U26","fu":1065.9,"vol":0.551,"totalPre":58.7,"volRange":[0.513,0.603],"morningAvg":0.575,"afternoonAvg":0.53,"close":0.524,"closePos":"near low"},{"date":"2026-07-09","series":"S50Z26","fu":1054.9,"vol":0.445,"totalPre":88.7,"volRange":[0.386,0.466],"morningAvg":0.449,"afternoonAvg":0.441,"close":0.386,"closePos":"near low"},{"date":"2026-07-09","series":"S50U26","fu":1055.1,"vol":0.655,"totalPre":59.8,"volRange":[0.596,0.681],"morningAvg":0.663,"afternoonAvg":0.648,"close":0.596,"closePos":"near low"},{"date":"2026-07-08","series":"S50Z26","fu":1040.6,"vol":0.368,"totalPre":91.2,"volRange":[0.313,0.457],"morningAvg":0.388,"afternoonAvg":0.35,"close":0.401,"closePos":"high-mid"},{"date":"2026-07-08","series":"S50U26","fu":1040.4,"vol":0.579,"totalPre":60.9,"volRange":[0.551,0.635],"morningAvg":0.58,"afternoonAvg":0.578,"close":0.635,"closePos":"near high"},{"date":"2026-07-07","series":"S50Z26","fu":1057.2,"vol":0.369,"totalPre":84.2,"volRange":[0.311,0.398],"morningAvg":0.355,"afternoonAvg":0.383,"close":0.396,"closePos":"near high"},{"date":"2026-07-07","series":"S50U26","fu":1057.7,"vol":0.556,"totalPre":56.4,"volRange":[0.507,0.6],"morningAvg":0.526,"afternoonAvg":0.581,"close":0.595,"closePos":"near high"},{"date":"2026-07-06","series":"S50Z26","fu":1062.5,"vol":0.361,"totalPre":84.1,"volRange":[0.297,0.509],"morningAvg":0.409,"afternoonAvg":0.311,"close":0.301,"closePos":"near low"},{"date":"2026-07-06","series":"S50U26","fu":1063.9,"vol":0.556,"totalPre":58.1,"volRange":[0.524,0.621],"morningAvg":0.576,"afternoonAvg":0.539,"close":0.525,"closePos":"near low"},{"date":"2026-07-03","series":"S50Z26","fu":1064.0,"vol":0.725,"totalPre":81.1,"volRange":[0.447,1.252],"morningAvg":1.022,"afternoonAvg":0.455,"close":0.459,"closePos":"near low","flag":"artifact"},{"date":"2026-07-03","series":"S50U26","fu":1065.5,"vol":0.616,"totalPre":59.9,"volRange":[0.564,0.635],"morningAvg":0.605,"afternoonAvg":0.625,"close":0.625,"closePos":"near high"},{"date":"2026-07-02","series":"S50Z26","fu":1048.0,"vol":0.923,"totalPre":88.8,"volRange":[0.353,1.112],"morningAvg":0.741,"afternoonAvg":1.101,"close":1.111,"closePos":"near high","flag":"artifact"},{"date":"2026-07-02","series":"S50U26","fu":1049.6,"vol":0.538,"totalPre":63.0,"volRange":[0.512,0.561],"morningAvg":0.528,"afternoonAvg":0.547,"close":0.557,"closePos":"near high"},{"date":"2026-07-01","series":"S50Z26","fu":1040.0,"vol":0.401,"totalPre":87.0,"volRange":[0.345,0.477],"morningAvg":0.43,"afternoonAvg":0.375,"close":0.346,"closePos":"near low"},{"date":"2026-07-01","series":"S50U26","fu":1041.5,"vol":0.603,"totalPre":63.5,"volRange":[0.539,0.636],"morningAvg":0.619,"afternoonAvg":0.589,"close":0.539,"closePos":"near low"},{"date":"2026-06-30","series":"S50Z26","fu":1045.2,"vol":0.359,"totalPre":99.0,"volRange":[0.311,0.396],"morningAvg":0.339,"afternoonAvg":0.374,"close":0.396,"closePos":"near high"},{"date":"2026-06-30","series":"S50U26","fu":1047.1,"vol":0.551,"totalPre":64.7,"volRange":[0.514,0.593],"morningAvg":0.537,"afternoonAvg":0.564,"close":0.593,"closePos":"near high"},{"date":"2026-06-29","series":"S50U26","fu":1031.2,"vol":0.425,"totalPre":66.0,"volRange":[0.409,0.443],"morningAvg":0.422,"afternoonAvg":0.428,"close":0.442,"closePos":"near high","note":"M26 expiry day"},{"date":"2026-06-26","series":"S50U26","fu":1013.3,"vol":0.487,"totalPre":71.2,"volRange":[0.478,0.499],"morningAvg":0.489,"afternoonAvg":0.485,"close":0.486,"closePos":"low-mid"}]};
+var PDGS_DATA={"updated":"2026-07-20","days":[{"date":"2026-07-20","series":"S50Z26","fu":1095.2,"vol":0.381,"totalPre":78.9,"volRange":[0.36,0.439],"morningAvg":0.384,"afternoonAvg":0.379,"close":0.391,"closePos":"low-mid"},{"date":"2026-07-20","series":"S50U26","fu":1095.7,"vol":0.562,"totalPre":53.1,"volRange":[0.543,0.587],"morningAvg":0.568,"afternoonAvg":0.556,"close":0.561,"closePos":"mid"},{"date":"2026-07-17","series":"S50Z26","fu":1088.4,"vol":0.354,"totalPre":82.4,"volRange":[0.322,0.415],"morningAvg":0.357,"afternoonAvg":0.351,"close":0.367,"closePos":"mid","daysLeft":165},{"date":"2026-07-17","series":"S50U26","fu":1088.7,"vol":0.556,"totalPre":52.0,"volRange":[0.512,0.586],"morningAvg":0.536,"afternoonAvg":0.573,"close":0.585,"closePos":"near high","daysLeft":74},{"date":"2026-07-16","series":"S50Z26","fu":1081.9,"vol":0.354,"totalPre":82.1,"volRange":[0.313,0.445],"morningAvg":0.378,"afternoonAvg":0.332,"close":0.315,"closePos":"near low"},{"date":"2026-07-16","series":"S50U26","fu":1082.4,"vol":0.532,"totalPre":53.0,"volRange":[0.502,0.587],"morningAvg":0.552,"afternoonAvg":0.515,"close":0.503,"closePos":"near low"},{"date":"2026-07-15","series":"S50Z26","fu":1072.6,"vol":0.413,"totalPre":86.6,"volRange":[0.376,0.495],"morningAvg":0.433,"afternoonAvg":0.394,"close":0.4,"closePos":"near low"},{"date":"2026-07-15","series":"S50U26","fu":1073.0,"vol":0.604,"totalPre":53.8,"volRange":[0.588,0.625],"morningAvg":0.612,"afternoonAvg":0.597,"close":0.591,"closePos":"near low"},{"date":"2026-07-14","series":"S50Z26","fu":1069.4,"vol":0.407,"totalPre":86.7,"volRange":[0.392,0.441],"morningAvg":0.411,"afternoonAvg":0.404,"close":0.413,"closePos":"mid"},{"date":"2026-07-14","series":"S50U26","fu":1070.0,"vol":0.613,"totalPre":56.9,"volRange":[0.589,0.624],"morningAvg":0.613,"afternoonAvg":0.614,"close":0.62,"closePos":"near high"},{"date":"2026-07-13","series":"S50Z26","fu":1071.5,"vol":0.369,"totalPre":87.2,"volRange":[0.333,0.404],"morningAvg":0.36,"afternoonAvg":0.376,"close":0.371,"closePos":"mid"},{"date":"2026-07-13","series":"S50U26","fu":1072.3,"vol":0.566,"totalPre":58.6,"volRange":[0.513,0.607],"morningAvg":0.539,"afternoonAvg":0.589,"close":0.589,"closePos":"near high"},{"date":"2026-07-10","series":"S50Z26","fu":1065.3,"vol":0.345,"totalPre":87.1,"volRange":[0.308,0.444],"morningAvg":0.371,"afternoonAvg":0.32,"close":0.327,"closePos":"near low"},{"date":"2026-07-10","series":"S50U26","fu":1065.9,"vol":0.551,"totalPre":58.7,"volRange":[0.513,0.603],"morningAvg":0.575,"afternoonAvg":0.53,"close":0.524,"closePos":"near low"},{"date":"2026-07-09","series":"S50Z26","fu":1054.9,"vol":0.445,"totalPre":88.7,"volRange":[0.386,0.466],"morningAvg":0.449,"afternoonAvg":0.441,"close":0.386,"closePos":"near low"},{"date":"2026-07-09","series":"S50U26","fu":1055.1,"vol":0.655,"totalPre":59.8,"volRange":[0.596,0.681],"morningAvg":0.663,"afternoonAvg":0.648,"close":0.596,"closePos":"near low"},{"date":"2026-07-08","series":"S50Z26","fu":1040.6,"vol":0.368,"totalPre":91.2,"volRange":[0.313,0.457],"morningAvg":0.388,"afternoonAvg":0.35,"close":0.401,"closePos":"high-mid"},{"date":"2026-07-08","series":"S50U26","fu":1040.4,"vol":0.579,"totalPre":60.9,"volRange":[0.551,0.635],"morningAvg":0.58,"afternoonAvg":0.578,"close":0.635,"closePos":"near high"},{"date":"2026-07-07","series":"S50Z26","fu":1057.2,"vol":0.369,"totalPre":84.2,"volRange":[0.311,0.398],"morningAvg":0.355,"afternoonAvg":0.383,"close":0.396,"closePos":"near high"},{"date":"2026-07-07","series":"S50U26","fu":1057.7,"vol":0.556,"totalPre":56.4,"volRange":[0.507,0.6],"morningAvg":0.526,"afternoonAvg":0.581,"close":0.595,"closePos":"near high"},{"date":"2026-07-06","series":"S50Z26","fu":1062.5,"vol":0.361,"totalPre":84.1,"volRange":[0.297,0.509],"morningAvg":0.409,"afternoonAvg":0.311,"close":0.301,"closePos":"near low"},{"date":"2026-07-06","series":"S50U26","fu":1063.9,"vol":0.556,"totalPre":58.1,"volRange":[0.524,0.621],"morningAvg":0.576,"afternoonAvg":0.539,"close":0.525,"closePos":"near low"},{"date":"2026-07-03","series":"S50Z26","fu":1064.0,"vol":0.725,"totalPre":81.1,"volRange":[0.447,1.252],"morningAvg":1.022,"afternoonAvg":0.455,"close":0.459,"closePos":"near low","flag":"artifact"},{"date":"2026-07-03","series":"S50U26","fu":1065.5,"vol":0.616,"totalPre":59.9,"volRange":[0.564,0.635],"morningAvg":0.605,"afternoonAvg":0.625,"close":0.625,"closePos":"near high"},{"date":"2026-07-02","series":"S50Z26","fu":1048.0,"vol":0.923,"totalPre":88.8,"volRange":[0.353,1.112],"morningAvg":0.741,"afternoonAvg":1.101,"close":1.111,"closePos":"near high","flag":"artifact"},{"date":"2026-07-02","series":"S50U26","fu":1049.6,"vol":0.538,"totalPre":63.0,"volRange":[0.512,0.561],"morningAvg":0.528,"afternoonAvg":0.547,"close":0.557,"closePos":"near high"},{"date":"2026-07-01","series":"S50Z26","fu":1040.0,"vol":0.401,"totalPre":87.0,"volRange":[0.345,0.477],"morningAvg":0.43,"afternoonAvg":0.375,"close":0.346,"closePos":"near low"},{"date":"2026-07-01","series":"S50U26","fu":1041.5,"vol":0.603,"totalPre":63.5,"volRange":[0.539,0.636],"morningAvg":0.619,"afternoonAvg":0.589,"close":0.539,"closePos":"near low"},{"date":"2026-06-30","series":"S50Z26","fu":1045.2,"vol":0.359,"totalPre":99.0,"volRange":[0.311,0.396],"morningAvg":0.339,"afternoonAvg":0.374,"close":0.396,"closePos":"near high"},{"date":"2026-06-30","series":"S50U26","fu":1047.1,"vol":0.551,"totalPre":64.7,"volRange":[0.514,0.593],"morningAvg":0.537,"afternoonAvg":0.564,"close":0.593,"closePos":"near high"},{"date":"2026-06-29","series":"S50U26","fu":1031.2,"vol":0.425,"totalPre":66.0,"volRange":[0.409,0.443],"morningAvg":0.422,"afternoonAvg":0.428,"close":0.442,"closePos":"near high","note":"M26 expiry day"},{"date":"2026-06-26","series":"S50U26","fu":1013.3,"vol":0.487,"totalPre":71.2,"volRange":[0.478,0.499],"morningAvg":0.489,"afternoonAvg":0.485,"close":0.486,"closePos":"low-mid"}]};
 /*PDGS_DATA_END*/
 var pdgsCharts={};
 // Cloud-first data source: the pdgs-daily-collector skill upserts the full
