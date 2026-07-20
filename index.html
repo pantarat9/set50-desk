@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>SET50 Options Desk v7g</title>
+<title>SET50 Options Desk v7h</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=Barlow+Condensed:wght@400;500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
@@ -199,7 +199,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
 
 <!-- TOPBAR -->
 <div class="topbar">
-  <div class="tb-logo"><div class="dot"></div><div class="tb-logo-text">SET50 <span>Desk</span> <span style="font-size:10px;color:var(--cyan);font-weight:400">v7g</span></div></div>
+  <div class="tb-logo"><div class="dot"></div><div class="tb-logo-text">SET50 <span>Desk</span> <span style="font-size:10px;color:var(--cyan);font-weight:400">v7h</span></div></div>
   <div class="tb-cells">
     <div class="tbc"><div class="tbc-l">Series / DTE</div><div class="tbc-v" id="tb-series" style="color:var(--cyan)">S50M26</div><div class="tbc-s" id="tb-expiry"><span id="tb-expiry-lbl">Jun 2026</span> <span id="tb-dte-chip" class="dte-chip"></span></div></div>
     <div class="tbc"><div class="tbc-l">SET50 Spot</div><div class="tbc-v" id="tb-spot" style="color:var(--cyan)">1030.0</div><div class="tbc-s" id="tb-spot-s">index</div></div>
@@ -529,6 +529,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
           <span id="chain-lbl" style="color:var(--cyan);text-transform:none;font-weight:400;font-size:11px">model prices</span> <span id="chain-badge" class="tag tc" style="margin-left:4px">Model</span>
         </div>
         <div id="chain-warn"></div>
+        <div id="richness-banner"></div>
         <div style="margin-bottom:8px;font-size:11px;color:var(--text2)">Click <span style="color:var(--green)">Bid(S)</span> to add Short · Click <span style="color:var(--cyan)">Offer(L)</span> to add Long · <span style="color:var(--text3)">Last(ref)</span> is reference only</div>
         <div style="overflow-x:auto"><table class="tbl" id="chain-tbl">
           <thead>
@@ -1151,6 +1152,7 @@ function buildSmileForSeries(series){
     put:  putPts.length>=3  ? buildCubicSpline(putPts.map(function(p){return p.k;}),putPts.map(function(p){return p.iv;})) : null,
     builtFor: entry.date
   };
+  buildSmileFit(series); // v7h: keep the quadratic richness fit in sync
 }
 
 function buildSmile(histEntry){
@@ -2675,6 +2677,182 @@ function piSyncPositions(){
   }).catch(function(e){piMsg('positions fail: '+e.message,false);});
 }
 
+// ════════════════════════════════════════════════════════════════
+// RICHNESS SIGNAL LAYERS (v7h) — see richness_layers_spec.md
+// Single IV source (Settrade ivMid), one smile fit, gated order
+// absolute→relative→side→gate. Each layer is a pure function; the
+// "dim when layers disagree" rule lives ONLY in the renderer.
+// ════════════════════════════════════════════════════════════════
+
+// ── L2: weighted quadratic smile fit (smoothing — residuals != 0) ──
+// σ(x) = a + b·x + c·x², x = ln(K/F). Coexists with the cubic spline
+// (used by getSmileSigma for far-strike pricing) and per-strike ivMid
+// (used to mark your own legs). This fit is ONLY for richness signals.
+var smileFitCache={}; // series -> {call:{a,b,c,rmse,n}, put:{...}, F, ivATM}
+function _solve(M,v){ // small Gaussian elimination, n x n
+  var n=v.length,i,j,k;
+  for(i=0;i<n;i++){
+    var p=i;for(j=i+1;j<n;j++)if(Math.abs(M[j][i])>Math.abs(M[p][i]))p=j;
+    if(Math.abs(M[p][i])<1e-12)return null;
+    var t=M[i];M[i]=M[p];M[p]=t;var tv=v[i];v[i]=v[p];v[p]=tv;
+    for(j=i+1;j<n;j++){var f=M[j][i]/M[i][i];for(k=i;k<n;k++)M[j][k]-=f*M[i][k];v[j]-=f*v[i];}
+  }
+  var x=new Array(n);
+  for(i=n-1;i>=0;i--){var s=v[i];for(j=i+1;j<n;j++)s-=M[i][j]*x[j];x[i]=s/M[i][i];}
+  return x;
+}
+function fitQuadWLS(pts){
+  // pts: [{x, y, w}] ; y = IV in percent. <5 pts -> linear (no curvature).
+  var n=pts.length;
+  if(n<3)return null;
+  var deg=n>=5?2:1;
+  var m=deg+1,i,a,b;
+  var A=[],V=[];
+  for(a=0;a<m;a++){A.push(new Array(m).fill(0));V.push(0);}
+  pts.forEach(function(p){
+    var xp=[1,p.x,p.x*p.x];
+    for(a=0;a<m;a++){for(b=0;b<m;b++)A[a][b]+=p.w*xp[a]*xp[b];V[a]+=p.w*xp[a]*p.y;}
+  });
+  var sol=_solve(A,V);
+  if(!sol)return null;
+  var co={a:sol[0],b:sol[1]||0,c:sol[2]||0};
+  // unweighted RMS residual in IV points (the "typical miss")
+  var ss=0;pts.forEach(function(p){var f=co.a+co.b*p.x+co.c*p.x*p.x;ss+=(p.y-f)*(p.y-f);});
+  co.rmse=Math.sqrt(ss/n);co.n=n;
+  return co;
+}
+function buildSmileFit(series){
+  smileFitCache[series]=null;
+  var entry=histDB.find(function(h){return h.series===series&&h.rows&&h.rows.length;});
+  if(!entry||!entry.rows||!(entry.fut>0))return;
+  if(!qcCache[series])buildSmileForSeries(series);
+  var q=qcCache[series];
+  var F=entry.fut;
+  function collect(type){
+    return entry.rows.filter(function(r){
+      return r.type===type&&r.iv>0&&(r.bid>0||r.offer>0)&&!(q&&q.isHard(r.strike,type));
+    }).map(function(r){
+      var sp=(r.offer>0&&r.bid>0&&r.offer>=r.bid)?(r.offer-r.bid):0;
+      return {x:Math.log(r.strike/F), y:r.iv, w:(1+(r.vol||0))/(1+sp)};
+    });
+  }
+  var cf=fitQuadWLS(collect('call')), pf=fitQuadWLS(collect('put'));
+  var atm=[];
+  if(cf)atm.push(cf.a); if(pf)atm.push(pf.a); // σ_fit(F): x=0 -> a
+  smileFitCache[series]={call:cf,put:pf,F:F,
+    ivATM: atm.length?atm.reduce(function(s,v){return s+v;},0)/atm.length:null};
+}
+function sigFit(K,type,series){ // returns IV in PERCENT, or null
+  var fc=smileFitCache[series];if(fc===undefined){buildSmileFit(series);fc=smileFitCache[series];}
+  if(!fc)return null;
+  var co=type==='call'?fc.call:fc.put;
+  if(!co||!(fc.F>0))return null;
+  var x=Math.log(K/fc.F);
+  var v=co.a+co.b*x+co.c*x*x;
+  return (v>3&&v<120)?v:null;
+}
+
+// ── L3: Smile Z-score (REL) — replaces the circular fvBadge ──
+// ivSpread is derived in vol space from the price spread and model vega,
+// so it works for both Pi (real IV) and older TFEX imports uniformly.
+function ivSpreadVol(F,K,T,sig,bid,off){
+  if(!(bid>0)||!(off>0)||off<bid)return null;
+  var vegaPt=bsv(F,K,T,0,sig)/100; // price move per 1 vol point
+  if(!(vegaPt>1e-6))return null;
+  return (off-bid)/vegaPt;
+}
+function zBadge(ivMidPct, sigFitPct, ivSpread, fitRMSE, type, wide, absDim){
+  if(sigFitPct===null||!(ivMidPct>0))return '';
+  // Noise floor: fit uncertainty ⊕ half the IV bid-ask, but never below an
+  // irreducible ~0.1 vol measurement floor — otherwise a pathologically clean
+  // fit (RMSE≈0) + tight spread makes Z explode on a trivial deviation.
+  var noise=Math.sqrt((fitRMSE||0)*(fitRMSE||0)+((ivSpread||0)/2)*((ivSpread||0)/2));
+  noise=Math.max(noise,0.1);
+  var Z=(ivMidPct-sigFitPct)/noise;
+  var aZ=Math.abs(Z);
+  if(aZ<1)return ''; // within noise — no verdict (fair)
+  var rich=Z>0; // ivMid above the fitted smile = expensive = candidate SELL
+  var strong=aZ>=2;
+  var base=rich?(type==='put'?'168,102,255':'168,102,255'):'0,229,154';
+  var col=rich?'var(--purple)':'var(--green)';
+  var lbl=(rich?'RICH':'CHEAP')+' '+(Z>0?'+':'')+Z.toFixed(1)+'σ';
+  var op=strong?1:0.55; // soft band 1..2σ shown dim
+  if(wide)op*=0.5;      // L6 gate: wide IV spread — edge likely uncapturable
+  if(absDim)op*=0.5;    // L7/0.B: absolute layer says don't act — demote to context
+  var tip=(rich?'ivMid สูงกว่าเส้น smile ':'ivMid ต่ำกว่าเส้น smile ')+aZ.toFixed(1)+'σ (mid '+ivMidPct.toFixed(1)+'% vs fit '+sigFitPct.toFixed(1)+'%, noise '+noise.toFixed(2)+')'+
+    (wide?' — spread กว้าง edge อาจจับไม่ได้':'')+(absDim?' — ตลาด IV โดยรวมไม่เอื้อ short เป็นข้อมูลประกอบ':'');
+  return '<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:8px;font-weight:700;background:rgba('+base+',0.12);color:'+col+';border:1px solid rgba('+base+',0.4);margin-left:3px;opacity:'+op.toFixed(2)+'" title="'+tip.replace(/"/g,'&quot;')+'">'+lbl+(wide?' ⚠':'')+'</span>';
+}
+
+// ── L4: skew (SIDE) — put vs call IV at ~25 delta from the fitted smile ──
+function skew25(series){
+  var fc=smileFitCache[series];if(!fc||!(fc.F>0))return null;
+  var entry=histDB.find(function(h){return h.series===series;});
+  var T=(entry?Math.max(seriesDTE(series)||35,1):35)/365;
+  // find strike where model delta ~ target for each side
+  function strikeAtDelta(type,target){
+    var best=null,bestErr=1e9;
+    for(var K=fc.F*0.7;K<=fc.F*1.3;K+=fc.F*0.005){
+      var s=sigFit(K,type,series);if(s===null)continue;
+      var d=Math.abs(bsd(fc.F,K,T,0,s/100,type));
+      var e=Math.abs(d-target);
+      if(e<bestErr){bestErr=e;best=K;}
+    }
+    return best;
+  }
+  var kp=strikeAtDelta('put',0.25), kc=strikeAtDelta('call',0.25);
+  if(kp===null||kc===null)return null;
+  var sp=sigFit(kp,'put',series), sc=sigFit(kc,'call',series);
+  if(sp===null||sc===null)return null;
+  return {skew:sp-sc, putIV:sp, callIV:sc, kp:kp, kc:kc};
+}
+
+// ── L5: VRP (ABS) — ivATM(today) − RV20, gated on ≥21 days history ──
+function realizedVol20(series){
+  var src=(typeof pdgsSource==='function')?pdgsSource():{days:[]};
+  var days=((src&&src.days)||[]).filter(function(d){return d.series===series&&d.fu>0;})
+    .slice().sort(function(a,b){return a.date.localeCompare(b.date);});
+  // de-dup by date (keep last)
+  var seen={},u=[];days.forEach(function(d){if(seen[d.date]!==undefined)u[seen[d.date]]=d;else{seen[d.date]=u.length;u.push(d);}});
+  days=u;
+  if(days.length<21)return {rv:null,n:days.length};
+  var rets=[];
+  for(var i=days.length-20;i<days.length;i++){ // last 20 returns
+    if(i<1)continue;
+    var gap=Math.max(1,Math.round((new Date(days[i].date)-new Date(days[i-1].date))/86400000));
+    rets.push(Math.log(days[i].fu/days[i-1].fu)/Math.sqrt(gap));
+  }
+  if(rets.length<20)return {rv:null,n:days.length};
+  var mu=rets.reduce(function(s,v){return s+v;},0)/rets.length;
+  var va=rets.reduce(function(s,v){return s+(v-mu)*(v-mu);},0)/(rets.length-1);
+  return {rv:Math.sqrt(va*252)*100, n:days.length};
+}
+function vrpFor(series){
+  var fc=smileFitCache[series];
+  var ivATM=fc?fc.ivATM:null;
+  var rv=realizedVol20(series);
+  if(ivATM===null)return {ivATM:null,rv:rv.rv,n:rv.n,vrp:null};
+  if(rv.rv===null)return {ivATM:ivATM,rv:null,n:rv.n,vrp:null};
+  var vrp=ivATM-rv.rv;
+  // persist daily VRP for future percentile (per series+date)
+  try{
+    var key='s50_vrp_hist';
+    var h=JSON.parse(LS.getItem(key)||'{}');
+    var d=new Date().toISOString().slice(0,10);
+    h[series]=h[series]||{};h[series][d]=+vrp.toFixed(2);
+    LS.setItem(key,JSON.stringify(h));
+    var vals=Object.keys(h[series]).map(function(k){return h[series][k];}).sort(function(a,b){return a-b;});
+    var pct=vals.length>=10?Math.round(vals.filter(function(v){return v<=vrp;}).length/vals.length*100):null;
+    return {ivATM:ivATM,rv:rv.rv,n:rv.n,vrp:vrp,pctile:pct,hn:vals.length};
+  }catch(e){return {ivATM:ivATM,rv:rv.rv,n:rv.n,vrp:vrp,pctile:null};}
+}
+// Absolute verdict used to dim relative badges (0.B). null = unknown -> no dim.
+function absShouldShort(series){
+  var v=vrpFor(series);
+  if(v.vrp===null)return null;      // not enough data — don't gate
+  return v.vrp>0;                   // premium rich vs realized -> ok to short
+}
+
 function findBreakevens(strikes,vals){
   var bks=[];
   for(var i=1;i<strikes.length;i++){if((vals[i-1]<0&&vals[i]>=0)||(vals[i-1]>=0&&vals[i]<0)){var frac=-vals[i-1]/(vals[i]-vals[i-1]);bks.push(+(strikes[i-1]+frac*(strikes[i]-strikes[i-1])).toFixed(0));}}
@@ -2873,8 +3051,22 @@ function chainRow(F,k,T,r,sig,cBid,cOff,cLast,cIV,cOI,cVol,pBid,pOff,pLast,pIV,p
   // failed hard no-arbitrage QC (garbage in, no verdict out).
   var cHard=!!(qc&&qc.isHard(k,'call')),pHard=!!(qc&&qc.isHard(k,'put'));
   var cSoft=!!(qc&&qc.isSoft(k,'call')),pSoft=!!(qc&&qc.isSoft(k,'put'));
-  var cFV=(isReal&&!cHard)?fvBadge(cBid,cModel,cVol,cIsOTM,'call'):'';
-  var pFV=(isReal&&!pHard)?fvBadge(pBid,pModel,pVol,pIsOTM,'put'):'';
+  // v7h: Smile Z-score badge (L3) — vs the fitted smile, not the strike's own
+  // IV (which was circular). Falls back to the legacy fvBadge only when no fit
+  // exists yet (e.g. <3 clean strikes) so early/thin chains still say something.
+  var _fit=smileFitCache[series];
+  var _absDim=(window._chainAbsShort===false); // set per-render; true-short or null => no dim
+  function _zb(bid,off,ivPct,sg,type){
+    var sf=sigFit(k,type,series);
+    if(sf===null)return fvBadge(bid,type==='call'?cModel:pModel,type==='call'?cVol:pVol,type==='call'?cIsOTM:pIsOTM,type);
+    var ivsp=ivSpreadVol(F,k,T,sg,bid,off);
+    var rmse=_fit?((type==='call'?(_fit.call&&_fit.call.rmse):(_fit.put&&_fit.put.rmse))||0):0;
+    var mid=(bid>0&&off>0&&off>=bid)?(off+bid)/2:0;
+    var wide=(mid>0.5&&(off-bid)/mid>0.25);
+    return zBadge(ivPct, sf, ivsp, rmse, type, wide, _absDim);
+  }
+  var cFV=(isReal&&!cHard&&cIsOTM)?_zb(cBid,cOff,+cIV,cSig,'call'):'';
+  var pFV=(isReal&&!pHard&&pIsOTM)?_zb(pBid,pOff,+pIV,pSig,'put'):'';
   // v7f: QC dot markers with reasons in the tooltip (red = no-arbitrage failure, amber = soft)
   function qcDot(hard,soft,kk,tt){
     if(!qc||(!hard&&!soft))return '';
@@ -2971,10 +3163,43 @@ function renderChainReal(entry){
       if(Math.abs(dev)>1.0)parts.push('<span style="color:var(--amber)">'+parityTxt+' — \u0394 '+(dev>0?'+':'')+dev.toFixed(1)+' pts. One of the two is off; check the futures quote.</span>');
       else parts.push('<span style="color:var(--green)">'+parityTxt+' \u2713</span>');
     }
-    if(qc.hardCount>0)parts.push('<span style="color:var(--red)">'+qc.hardCount+' line'+(qc.hardCount>1?'s':'')+' failed no-arbitrage QC</span> (red dot \u2014 excluded from smile fit &amp; FV badges)');
+    if(qc.hardCount>0)parts.push('<span style="color:var(--red)">'+qc.hardCount+' line'+(qc.hardCount>1?'s':'')+' failed no-arbitrage QC</span> (red dot \u2014 excluded from smile fit &amp; Z badges)');
     if(qc.softCount>0)parts.push('<span style="color:var(--amber)">'+qc.softCount+' soft-flagged</span> (amber dot \u2014 no volume / wide spread)');
     warnEl.innerHTML=parts.length?'<div class="alert al-c" style="font-size:11px;margin-bottom:8px">'+parts.join(' \u00b7 ')+'</div>':'';
   }
+  renderRichnessBanner(series);
+}
+
+// v7h: richness layer readout (ABS \u00b7 SIDE) + set the absolute-dim flag used by
+// the per-strike Z badges (0.B gating happens here in the renderer, not in L3).
+function renderRichnessBanner(series){
+  var el=document.getElementById('richness-banner');
+  buildSmileFit(series);
+  var fit=smileFitCache[series];
+  var v=vrpFor(series);
+  var sk=skew25(series);
+  window._chainAbsShort=(v.vrp===null)?null:(v.vrp>0);
+  if(!el)return;
+  var bits=[];
+  // ABS: VRP (primary once data ready) + IVR (legacy, secondary \u2014 choice A)
+  var ivrEl=document.getElementById('i-ivr');var ivr=ivrEl?(+ivrEl.value||null):null;
+  if(v.vrp!==null){
+    var vc=v.vrp>0?'var(--green)':'var(--red)';
+    bits.push('<b>ABS</b> VRP <span style="color:'+vc+'">'+(v.vrp>0?'+':'')+v.vrp.toFixed(1)+' vol</span> (ATM '+v.ivATM.toFixed(1)+'% \u2212 RV20 '+v.rv.toFixed(1)+'%'+(v.pctile!=null?', '+v.pctile+'th pct/'+v.hn+'d':'')+') \u2014 '+(v.vrp>0?'premium rich, short OK':'premium \u0e15\u0e48\u0e33, \u0e2d\u0e22\u0e48\u0e32 short'));
+  }else{
+    bits.push('<b>ABS</b> VRP: \u0e2a\u0e30\u0e2a\u0e21 '+(v.n||0)+'/21 \u0e27\u0e31\u0e19'+(v.ivATM!=null?' (ATM '+v.ivATM.toFixed(1)+'%)':''));
+  }
+  if(ivr!=null)bits.push('<span style="color:var(--text3)">IVR '+ivr+' (straddle legacy)</span>');
+  // SIDE: skew
+  if(sk){
+    var sc=sk.skew>0?'var(--purple)':'var(--cyan)';
+    bits.push('<b>SIDE</b> put skew <span style="color:'+sc+'">'+(sk.skew>0?'+':'')+sk.skew.toFixed(1)+' vol</span> (25\u0394 put '+sk.putIV.toFixed(1)+'% vs call '+sk.callIV.toFixed(1)+'%)'+(sk.skew>0?' \u2014 put \u0e41\u0e1e\u0e07\u0e01\u0e27\u0e48\u0e32':''));
+  }
+  if(fit&&(fit.call||fit.put)){
+    var rm=[(fit.call&&fit.call.rmse),(fit.put&&fit.put.rmse)].filter(function(x){return x!=null;});
+    if(rm.length)bits.push('<span style="color:var(--text3)">fit RMSE '+(rm.reduce(function(s,x){return s+x;},0)/rm.length).toFixed(2)+' vol</span>');
+  }
+  el.innerHTML=bits.length?'<div class="alert al-c" style="font-size:11px;margin-bottom:8px;line-height:1.7">'+bits.join(' \u00b7 ')+'</div>':'';
 }
 function chainAdd(tp,K,ls,prem,dte){
   var sel=document.getElementById('chain-series-sel');
