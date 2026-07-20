@@ -201,7 +201,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
 <div class="topbar">
   <div class="tb-logo"><div class="dot"></div><div class="tb-logo-text">SET50 <span>Desk</span> <span style="font-size:10px;color:var(--cyan);font-weight:400">v7g</span></div></div>
   <div class="tb-cells">
-    <div class="tbc"><div class="tbc-l">Series / DTE</div><div class="tbc-v" id="tb-series" style="color:var(--cyan)">S50U26</div><div class="tbc-s" id="tb-expiry"><span id="tb-expiry-lbl">Sep 2026</span> <span id="tb-dte-chip" class="dte-chip"></span></div></div>
+    <div class="tbc"><div class="tbc-l">Series / DTE</div><div class="tbc-v" id="tb-series" style="color:var(--cyan)">S50M26</div><div class="tbc-s" id="tb-expiry"><span id="tb-expiry-lbl">Jun 2026</span> <span id="tb-dte-chip" class="dte-chip"></span></div></div>
     <div class="tbc"><div class="tbc-l">SET50 Spot</div><div class="tbc-v" id="tb-spot" style="color:var(--cyan)">1030.0</div><div class="tbc-s" id="tb-spot-s">index</div></div>
     <div class="tbc"><div class="tbc-l">Future</div><div class="tbc-v" id="tb-fut">1030.2</div><div class="tbc-s" id="tb-basis" style="color:var(--amber)">basis 0.0</div></div>
     <div class="tbc"><div class="tbc-l">Port P&amp;L (pts)</div><div class="tbc-v" id="tb-pnl" style="color:var(--green)">0.0</div><div class="tbc-s" id="tb-pnl-b">฿0</div></div>
@@ -310,6 +310,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
         <button class="btn btn-a btn-sm btn-full" onclick="quickBookSave()" title="Save current position to book">Save to book</button>
         <button class="btn btn-r btn-sm btn-full" onclick="deleteAllData()" title="Wipe all option legs, futures trades, imported chains, and saved positions from this device — use before sharing the file">Delete all position history</button>
         <button class="btn btn-c btn-sm btn-full" onclick="downloadShareSafeTemplate()" title="Download a sanitized copy: no cloud config, no positions/trades/book, market data retained">Export share-safe template</button>
+        <button class="btn btn-gh btn-sm btn-full" onclick="cloudLogout()" title="Sign out of cloud sync on this device">Log out</button>
+        <button class="btn btn-r btn-sm btn-full" onclick="cloudDeleteAccount()" title="Delete ALL cloud data for this account (desk_kv rows), then sign out. Double confirmation required.">Delete account</button>
       </div>
     </div>
   </div>
@@ -587,7 +589,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
       <div class="card">
         <div class="ct">Strategy parameters</div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px;margin-bottom:8px">
-          <div class="fld"><label>Center strike K</label><input type="number" id="bf-k" placeholder="ATM" step="10" id="bf-k"></div>
+          <div class="fld"><label>Center strike K</label><input type="number" id="bf-k" placeholder="ATM" step="10"></div>
           <div class="fld"><label>Wing width (pts)</label><input type="number" id="bf-w" value="20" step="5" min="5"></div>
           <div class="fld"><label>Lots per wing</label><input type="number" id="bf-lots" value="2" min="1"></div>
           <div class="fld"><label>DTE</label><input type="number" id="bf-dte" value="35" min="1"></div>
@@ -683,6 +685,13 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
         <div style="position:relative;width:100%;height:120px"><canvas id="hc-prem"></canvas></div>
         <div id="hc-note" style="font-size:10px;color:var(--text3);margin-top:6px"></div>
       </div>
+      <!-- v7g: PDGS daily feed (synced via Supabase s50_pdgs by pdgs-daily-collector skill) -->
+      <div class="card">
+        <div class="ct">PDGS daily <span style="font-size:10px;color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0;margin-left:4px">pantaratDesk · Vol units = house convention (relative use only)</span></div>
+        <div style="position:relative;width:100%;height:120px;margin-bottom:6px"><canvas id="pdgs-vol"></canvas></div>
+        <div style="position:relative;width:100%;height:120px"><canvas id="pdgs-prem"></canvas></div>
+        <div id="pdgs-note" style="font-size:10px;color:var(--text3);margin-top:6px"></div>
+      </div>
       <div class="card">
         <div class="ct">Saved market data <button class="btn btn-gh btn-sm" onclick="exportJSON()" style="margin-left:6px">Export JSON</button></div>
         <div id="hist-list"><div class="empty">No saved days</div></div>
@@ -710,6 +719,31 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
     </div>
 
     <div id="t-import" class="tpanel">
+      <!-- BROKER: PI REALTIME CONNECTOR (v7g) -->
+      <div class="card" style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+          <div class="ct" style="margin:0">Broker — Pi realtime <span style="font-size:10px;color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0">Settrade Open API</span></div>
+          <span id="pi-status" class="mono" style="font-size:11px;color:var(--text3)">offline</span>
+        </div>
+        <div class="alert al-c" style="margin-bottom:10px;font-size:11px">
+          <strong>Privacy:</strong> key เก็บเฉพาะในเครื่องนี้ (device-local — ไม่เข้า namespace ที่ sync ขึ้น cloud) และคุยกับ <span class="mono">pi_connector.py</span> ที่รันบนเครื่องเดียวกันเท่านั้น (127.0.0.1) ข้อมูลบัญชีไม่ผ่าน server ภายนอกใดๆ ·
+          <strong>ขอ key:</strong> login Settrade Streaming ของ Pi → เมนู Settrade OpenAPI → Generate (ได้ App ID + App Secret ครั้งเดียว เก็บให้ดี)
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:7px;margin-bottom:9px">
+          <div class="fld"><label>App ID</label><input type="text" id="pi-appid" autocomplete="off"></div>
+          <div class="fld"><label>App Secret</label><input type="password" id="pi-secret" autocomplete="off"></div>
+          <div class="fld"><label>Broker ID</label><input type="text" id="pi-broker" placeholder="003 (Pi)"></div>
+          <div class="fld"><label>Deriv. account no.</label><input type="text" id="pi-account" placeholder="เช่น 1234567D"></div>
+          <div class="fld"><label>Connector port</label><input type="text" id="pi-port" placeholder="8750"></div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <button class="btn btn-g btn-sm" id="pi-connect-btn" onclick="piConnect()">Connect</button>
+          <button class="btn btn-gh btn-sm" onclick="piDisconnect()">Disconnect</button>
+          <button class="btn btn-c btn-sm" onclick="piPullChain()" title="ดึง chain สดของ series ในช่อง Series prefix ด้านล่าง แล้ว save เป็นข้อมูลของวันนี้ (ผ่าน QC ตามปกติ)">Pull chain &amp; save</button>
+          <button class="btn btn-a btn-sm" onclick="piSyncPositions()" title="ดึง positions จริงจากบัญชี มาเป็น Order Text preview — ไม่แตะ book จนกว่าจะกด Apply">Sync positions → Order Text</button>
+          <span style="font-size:10px;color:var(--text3)">ต้องรัน <span class="mono">python3 pi_connector.py</span> ใน SET50_Trading ก่อน (ทดสอบไม่ใช้ key จริง: <span class="mono">--mock</span>)</span>
+        </div>
+      </div>
       <div class="card">
         <div class="ct">Import SET50 option chain — paste directly from TFEX website</div>
         <div class="alert al-c" style="margin-bottom:12px">
@@ -855,8 +889,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
 // If left as PASTE_..., the desk runs in LOCAL-ONLY mode (device storage,
 // no sync) so the file still works before setup.
 // ════════════════════════════════════════════════════════════════
-var SB_URL = 'https://xrvutzfjqckcdvralqzf.supabase.co';      // e.g. https://abcdefgh.supabase.co
-var SB_KEY = 'sb_publishable_sv8QknZX0IbbOWgGILFIXA_4BReam9K'; // the "anon / public" key (NOT service_role)
+var SB_URL = 'https://xrvutzfjqckcdvralqzf.supabase.co';      // injected for deploy
+var SB_KEY = 'sb_publishable_sv8QknZX0IbbOWgGILFIXA_4BReam9K'; // anon/public key (injected for deploy)
 
 // Real browser localStorage = offline mirror + dirty-queue. May be blocked on file://.
 var _realLS = null;
@@ -932,22 +966,6 @@ function buildCloudUI() {
   };
   document.body.appendChild(b);
 
-  var da = document.createElement('div');
-  da.id = 'del-acct';
-  da.style.cssText = 'position:fixed;bottom:38px;right:10px;z-index:9999;font:10px -apple-system,Segoe UI,sans-serif;background:#161b22;border:1px solid #b62324;border-radius:12px;padding:3px 10px;color:#f85149;cursor:pointer;user-select:none;display:none';
-  da.textContent = 'delete account';
-  da.title = 'Permanently delete your account and all your data';
-  da.onclick = _deleteAccount;
-  document.body.appendChild(da);
-
-  var lo = document.createElement('div');
-  lo.id = 'log-out';
-  lo.style.cssText = 'position:fixed;bottom:66px;right:10px;z-index:9999;font:10px -apple-system,Segoe UI,sans-serif;background:#161b22;border:1px solid #30363d;border-radius:12px;padding:3px 10px;color:#8b949e;cursor:pointer;user-select:none;display:none';
-  lo.textContent = 'log out';
-  lo.title = 'Sign out of cloud sync on this device';
-  lo.onclick = function () { if (LS.sb && confirm('Log out of this device?')) { setBadge('logging out…', '#d29922'); LS.sb.auth.signOut().then(function () { location.reload(); }); } };
-  document.body.appendChild(lo);
-
   var o = document.createElement('div');
   o.id = 'login-ovl';
   o.style.cssText = 'position:fixed;inset:0;z-index:10000;background:#0d1117;display:none;align-items:center;justify-content:center';
@@ -967,9 +985,25 @@ function buildCloudUI() {
   document.getElementById('cl-up').onclick = function () { _doAuth('signUp'); };
   document.getElementById('cl-pass').addEventListener('keydown', function (e) { if (e.key === 'Enter') _doAuth('signInWithPassword'); });
 }
+// Cloud account controls (deploy tweak, now in-source)
+function cloudLogout(){
+  if(!(LS.sb&&LS.uid)){alert('Not signed in.');return;}
+  if(confirm('Sign out of cloud sync on this device?'))LS.sb.auth.signOut().then(function(){location.reload();});
+}
+function cloudDeleteAccount(){
+  if(!(LS.sb&&LS.uid)){alert('Not signed in.');return;}
+  if(!confirm('DELETE ALL cloud data for this account? Every synced key (positions, history, journal, PDGS) will be removed from Supabase. This cannot be undone.'))return;
+  if(prompt('Type DELETE to confirm')!=='DELETE')return;
+  LS.sb.from('desk_kv').delete().eq('user_id',LS.uid).then(function(r){
+    if(r&&r.error){alert('Delete failed: '+r.error.message);return;}
+    try{if(_realLS)Object.keys(localStorage).forEach(function(k){if(k.indexOf('s50_')===0)localStorage.removeItem(k);});}catch(e){}
+    alert('Cloud data deleted. Signing out.');
+    LS.sb.auth.signOut().then(function(){location.reload();});
+  });
+}
 function setBadge(t, c) { var b = document.getElementById('sync-badge'); if (b) { b.textContent = t; b.style.color = c || '#8b949e'; } }
 function _err(m) { var e = document.getElementById('cl-err'); if (e) e.textContent = m || ''; }
-function showLogin() { document.getElementById('login-ovl').style.display = 'flex'; setBadge('signed out', '#8b949e'); var _da = document.getElementById('del-acct'); if (_da) _da.style.display = 'none'; var _lo = document.getElementById('log-out'); if (_lo) _lo.style.display = 'none'; }
+function showLogin() { document.getElementById('login-ovl').style.display = 'flex'; setBadge('signed out', '#8b949e'); }
 function hideLogin() { document.getElementById('login-ovl').style.display = 'none'; }
 
 function _doAuth(method) {
@@ -985,21 +1019,9 @@ function _doAuth(method) {
   }).catch(function (e) { _err('Network error — check connection.'); });
 }
 
-function _deleteAccount() {
-  if (!LS.sb || !LS.uid) return;
-  if (!confirm('Delete your account? This permanently removes your login and ALL your positions and data. This cannot be undone.')) return;
-  if (!confirm('Are you absolutely sure? Export a JSON backup first if you want to keep anything.')) return;
-  setBadge('deleting…', '#d29922');
-  LS.sb.rpc('delete_own_account').then(function (r) {
-    if (r.error) { setBadge('delete failed', '#f85149'); alert('Delete failed: ' + r.error.message); return; }
-    if (LS.sb.auth.signOut) { LS.sb.auth.signOut().then(function () { location.reload(); }); } else { location.reload(); }
-  }).catch(function (e) { setBadge('delete failed', '#f85149'); alert('Network error deleting account.'); });
-}
 function afterLogin(session) {
   LS.uid = session.user.id;
   hideLogin();
-  var _da = document.getElementById('del-acct'); if (_da) _da.style.display = 'block';
-  var _lo = document.getElementById('log-out'); if (_lo) _lo.style.display = 'block';
   setBadge('loading…', '#d29922');
   try { LS.dirty = JSON.parse((_realLS && _realLS.getItem('s50__dirty')) || '{}'); } catch (e) { LS.dirty = {}; }
   LS.sb.from('desk_kv').select('key,value').then(function (r) {
@@ -1493,8 +1515,8 @@ function renderDiagnostics(){
 function downloadShareSafeTemplate(){
   if(!confirm('Download a share-safe template copy?\n\nIt removes Supabase config and built-in position/trade seed data from the downloaded HTML. Market-data seeds stay.'))return;
   var html='<!DOCTYPE html>\n'+document.documentElement.outerHTML;
-  html=html.replace(/var SB_URL = '[^']*';/, "var SB_URL = 'https://xrvutzfjqckcdvralqzf.supabase.co';");
-  html=html.replace(/var SB_KEY = '[^']*';/, "var SB_KEY = 'sb_publishable_sv8QknZX0IbbOWgGILFIXA_4BReam9K';");
+  html=html.replace(/var SB_URL = '[^']*';/, "var SB_URL = 'PASTE_SUPABASE_URL_HERE';");
+  html=html.replace(/var SB_KEY = '[^']*';/, "var SB_KEY = 'PASTE_SUPABASE_ANON_KEY_HERE';");
   html=html.replace(/SET50 <span>Desk<\/span> <span style="font-size:10px;color:[^\"]+;font-weight:400">[^<]*<\/span>/, 'SET50 <span>Desk</span> <span style="font-size:10px;color:var(--amber);font-weight:400">Share Template</span>');
   html=html.replace(/tfexTrades = \[[\s\S]*?\];\s*legs = \[[\s\S]*?\];/, 'tfexTrades = [];\nlegs = [];');
   html=html.replace(/saveState\(\);saveTfex\(\);/g, 'saveState();saveTfex();');
@@ -2500,6 +2522,112 @@ function otCopyBook(){
   el.innerHTML='<div class="alert al-g">Book serialized ('+legs.length+' legs, '+tfexTrades.length+' futures trades) — copied to clipboard. Round-trips through Parse.</div>';
 }
 
+// ── PI BROKER CONNECTOR (v7g) ───────────────────────────────────
+// Talks ONLY to pi_connector.py on 127.0.0.1 (the connector holds the broker
+// session; its CORS allowlist means other sites can't read it). Credentials
+// are stored device-local via _realLS under pi_* — deliberately OUTSIDE the
+// s50_ namespace, so the cloud sync layer never sees them. Quotes flow into
+// the existing futQuotes store tagged src 'pi-live'; chain pulls reuse the
+// normal import+QC pipeline; positions land in Order Text preview and touch
+// nothing until the user clicks Apply.
+function piStore(k,v){try{if(_realLS){if(v==null||v==='')_realLS.removeItem('pi_'+k);else _realLS.setItem('pi_'+k,String(v));}}catch(e){}}
+function piGet(k){try{return _realLS?_realLS.getItem('pi_'+k):null;}catch(e){return null;}}
+var piState={connected:false,timer:null,fail:0,lastRender:0};
+function piUrl(){return 'http://127.0.0.1:'+((piGet('port')||'8750'));}
+function piMsg(txt,ok){var el=document.getElementById('pi-status');if(el){el.textContent=txt;el.style.color=ok===true?'var(--green)':ok===false?'var(--red)':'var(--text3)';}}
+function _piVal(id){var el=document.getElementById(id);return el?el.value.trim():'';}
+function piFillFields(){
+  var map={'pi-appid':'app_id','pi-secret':'app_secret','pi-broker':'broker_id','pi-account':'account_no','pi-port':'port'};
+  Object.keys(map).forEach(function(id){var v=piGet(map[id]);var el=document.getElementById(id);if(el&&v)el.value=v;});
+}
+function piConnect(){
+  var cfg={app_id:_piVal('pi-appid'),app_secret:_piVal('pi-secret'),
+           broker_id:_piVal('pi-broker')||'003',account_no:_piVal('pi-account')};
+  piStore('app_id',cfg.app_id);piStore('app_secret',cfg.app_secret);
+  piStore('broker_id',cfg.broker_id);piStore('account_no',cfg.account_no);
+  piStore('port',_piVal('pi-port'));
+  piMsg('connecting…');
+  fetch(piUrl()+'/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)})
+    .then(function(r){return r.json();})
+    .then(function(j){
+      if(!j.ok)throw new Error(j.error||'config rejected');
+      piState.connected=true;piState.fail=0;
+      if(piState.timer)clearInterval(piState.timer);
+      piState.timer=setInterval(piPoll,3000);
+      piMsg('connected'+(j.logged_in?' · logged in':' · not logged in'),true);
+      piPoll();
+    })
+    .catch(function(e){
+      piState.connected=false;
+      piMsg('ต่อไม่ได้: '+e.message+' — connector รันอยู่ไหม? (python3 pi_connector.py)',false);
+    });
+}
+function piDisconnect(){
+  if(piState.timer)clearInterval(piState.timer);
+  piState.timer=null;piState.connected=false;piMsg('offline');
+}
+function piPoll(){
+  fetch(piUrl()+'/quotes').then(function(r){return r.json();}).then(function(j){
+    piState.fail=0;
+    var q=j.quotes||{},changed=false;
+    if(q.SET50&&q.SET50.last>0){
+      window.piLastSet50=q.SET50.last;
+      var sp=document.getElementById('i-spot');
+      if(sp&&Math.abs((+sp.value||0)-q.SET50.last)>=0.05){sp.value=q.SET50.last;changed=true;}
+    }
+    var front=getDefaultSeries();
+    Object.keys(q).forEach(function(s){
+      if(s==='SET50')return;
+      var qq=q[s];if(!qq||!(qq.last>0))return;
+      futqUpsert(s,qq.last,null,todayISO(),'pi-live');
+      if(s===front){
+        var f=document.getElementById('i-fut');
+        if(f&&Math.abs((+f.value||0)-qq.last)>=0.05){f.value=qq.last;changed=true;}
+      }
+    });
+    saveFutQ();
+    piMsg('live '+new Date().toTimeString().slice(0,8)+(j.mode==='mock'?' · MOCK':''),true);
+    var now=Date.now();
+    if(changed){
+      saveInputs();
+      if(now-piState.lastRender>5000){piState.lastRender=now;updateDTE();ua();}
+    }
+  }).catch(function(){
+    piState.fail++;
+    piMsg('poll fail ×'+piState.fail,false);
+    if(piState.fail>=5){piDisconnect();piMsg('หลุดการเชื่อมต่อ — connector ปิด?',false);}
+  });
+}
+function piPullChain(){
+  var series=(_piVal('im-series')||getDefaultSeries()).toUpperCase();
+  piMsg('pulling chain '+series+'…');
+  fetch(piUrl()+'/chain/'+series).then(function(r){return r.json();}).then(function(c){
+    if(!c.rows||!c.rows.length)throw new Error(c.error||'no rows');
+    importRows=c.rows;
+    var set=function(id,v){var el=document.getElementById(id);if(el)el.value=v;};
+    set('im-series',series);set('im-date',c.date);set('im-fut',c.fut);
+    var sp=(window.piLastSet50>0)?window.piLastSet50:c.fut;
+    var spEl=document.getElementById('im-spot');if(spEl&&!(+spEl.value>0))spEl.value=sp;
+    if(typeof onImSeriesChange==='function')onImSeriesChange();
+    saveImport();
+    var msg=document.getElementById('im-msg');
+    if(msg)msg.innerHTML='<div class="alert al-g">Pi live chain '+series+' — '+c.rows.length+' rows saved as '+c.date+(c.time?' @'+c.time:'')+(c.mode==='mock'?' (MOCK)':'')+'. QC/smile ทำงานตามปกติ</div>';
+    piMsg('chain '+series+' saved',true);
+  }).catch(function(e){piMsg('chain fail: '+e.message,false);});
+}
+function piSyncPositions(){
+  piMsg('pulling positions…');
+  fetch(piUrl()+'/portfolio').then(function(r){return r.json();}).then(function(p){
+    if(p.error)throw new Error(p.error);
+    if(!p.positions||!p.positions.length)throw new Error('no S50 positions in account');
+    var txt='# Pi positions '+new Date().toISOString().slice(0,10)+(p.mode==='mock'?' (MOCK)':'')+'\n'+
+      p.positions.map(function(x){return x.orderText;}).join('\n');
+    var ot=document.getElementById('ot-input');
+    if(ot){ot.value=txt;otParse();}
+    piMsg(p.positions.length+' positions → Order Text preview (Payoff tab) — ตรวจแล้วกด Apply',true);
+  }).catch(function(e){piMsg('positions fail: '+e.message,false);});
+}
+
 function findBreakevens(strikes,vals){
   var bks=[];
   for(var i=1;i<strikes.length;i++){if((vals[i-1]<0&&vals[i]>=0)||(vals[i-1]>=0&&vals[i]<0)){var frac=-vals[i-1]/(vals[i]-vals[i-1]);bks.push(+(strikes[i-1]+frac*(strikes[i]-strikes[i-1])).toFixed(0));}}
@@ -3232,6 +3360,7 @@ bookRender();ua();
 function exportJSON(){var blob=new Blob([JSON.stringify(histDB,null,2)],{type:'application/json'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='set50_history_'+new Date().toISOString().slice(0,10)+'.json';a.click();}
 function importJSON(input){var file=input.files[0];if(!file)return;var reader=new FileReader();reader.onload=function(e){try{var d=JSON.parse(e.target.result);if(Array.isArray(d)){histDB=[...d,...histDB];histDB.sort(function(a,b){return b.date.localeCompare(a.date);});saveState();renderHist();ua();alert('Imported '+d.length+' days.');}else alert('Invalid file.');}catch(err){alert('Error reading file.');}};reader.readAsText(file);}
 function renderHist(){
+  renderPdgsCharts(); // PDGS card is independent of chain history
   var el=document.getElementById('hist-list');
   if(!histDB.length){el.innerHTML='<div class="empty">No saved days</div>';return;}
   el.innerHTML=histDB.map(function(h,i){return'<div class="hist-card'+(i===0?' active':'')+'" onclick="loadHistEntry('+i+')"><div style="display:flex;justify-content:space-between;align-items:center"><span class="mono" style="font-size:12px;font-weight:700;color:var(--cyan)">'+h.date+' '+h.series+'</span><div style="display:flex;gap:5px"><span class="tag tc">'+h.rows.length+' rows</span><button class="btn btn-r btn-xs" onclick="event.stopPropagation();delHist('+i+')">X</button></div></div><div style="font-size:11px;color:var(--text2);margin-top:3px">Spot '+h.spot+' / Future '+h.fut+'</div></div>';}).join('');
@@ -3332,6 +3461,72 @@ function renderHistCharts(){
   }
 }
 
+// ── PDGS DAILY · pantaratDesk (v7g) ─────────────────────────────
+// PDGS = pantaratDesk daily Fu/Vol/Premium series (raw numbers originate from
+// OptionsGo Telegram posts). Primary store: Supabase desk_kv key s50_pdgs,
+// written by the pdgs-daily-collector skill; the block below is the embedded
+// fallback (source of truth on disk: SET50_Trading/pdgs_daily.json). Do not
+// hand-edit; rerun the skill's update_desk.py instead.
+// NOTE: "vol" units are a house convention (proven not derivable from close
+// data). Treat as a RELATIVE regime indicator only.
+/*PDGS_DATA_START*/
+var PDGS_DATA={"updated":"2026-07-17","days":[{"date":"2026-07-17","series":"S50Z26","fu":1088.4,"vol":0.354,"totalPre":82.4,"volRange":[0.322,0.415],"morningAvg":0.357,"afternoonAvg":0.351,"close":0.367,"closePos":"mid","daysLeft":165},{"date":"2026-07-17","series":"S50U26","fu":1088.7,"vol":0.556,"totalPre":52.0,"volRange":[0.512,0.586],"morningAvg":0.536,"afternoonAvg":0.573,"close":0.585,"closePos":"near high","daysLeft":74},{"date":"2026-07-16","series":"S50Z26","fu":1081.9,"vol":0.354,"totalPre":82.1,"volRange":[0.313,0.445],"morningAvg":0.378,"afternoonAvg":0.332,"close":0.315,"closePos":"near low"},{"date":"2026-07-16","series":"S50U26","fu":1082.4,"vol":0.532,"totalPre":53.0,"volRange":[0.502,0.587],"morningAvg":0.552,"afternoonAvg":0.515,"close":0.503,"closePos":"near low"},{"date":"2026-07-15","series":"S50Z26","fu":1072.6,"vol":0.413,"totalPre":86.6,"volRange":[0.376,0.495],"morningAvg":0.433,"afternoonAvg":0.394,"close":0.4,"closePos":"near low"},{"date":"2026-07-15","series":"S50U26","fu":1073.0,"vol":0.604,"totalPre":53.8,"volRange":[0.588,0.625],"morningAvg":0.612,"afternoonAvg":0.597,"close":0.591,"closePos":"near low"},{"date":"2026-07-14","series":"S50Z26","fu":1069.4,"vol":0.407,"totalPre":86.7,"volRange":[0.392,0.441],"morningAvg":0.411,"afternoonAvg":0.404,"close":0.413,"closePos":"mid"},{"date":"2026-07-14","series":"S50U26","fu":1070.0,"vol":0.613,"totalPre":56.9,"volRange":[0.589,0.624],"morningAvg":0.613,"afternoonAvg":0.614,"close":0.62,"closePos":"near high"},{"date":"2026-07-13","series":"S50Z26","fu":1071.5,"vol":0.369,"totalPre":87.2,"volRange":[0.333,0.404],"morningAvg":0.36,"afternoonAvg":0.376,"close":0.371,"closePos":"mid"},{"date":"2026-07-13","series":"S50U26","fu":1072.3,"vol":0.566,"totalPre":58.6,"volRange":[0.513,0.607],"morningAvg":0.539,"afternoonAvg":0.589,"close":0.589,"closePos":"near high"},{"date":"2026-07-10","series":"S50Z26","fu":1065.3,"vol":0.345,"totalPre":87.1,"volRange":[0.308,0.444],"morningAvg":0.371,"afternoonAvg":0.32,"close":0.327,"closePos":"near low"},{"date":"2026-07-10","series":"S50U26","fu":1065.9,"vol":0.551,"totalPre":58.7,"volRange":[0.513,0.603],"morningAvg":0.575,"afternoonAvg":0.53,"close":0.524,"closePos":"near low"},{"date":"2026-07-09","series":"S50Z26","fu":1054.9,"vol":0.445,"totalPre":88.7,"volRange":[0.386,0.466],"morningAvg":0.449,"afternoonAvg":0.441,"close":0.386,"closePos":"near low"},{"date":"2026-07-09","series":"S50U26","fu":1055.1,"vol":0.655,"totalPre":59.8,"volRange":[0.596,0.681],"morningAvg":0.663,"afternoonAvg":0.648,"close":0.596,"closePos":"near low"},{"date":"2026-07-08","series":"S50Z26","fu":1040.6,"vol":0.368,"totalPre":91.2,"volRange":[0.313,0.457],"morningAvg":0.388,"afternoonAvg":0.35,"close":0.401,"closePos":"high-mid"},{"date":"2026-07-08","series":"S50U26","fu":1040.4,"vol":0.579,"totalPre":60.9,"volRange":[0.551,0.635],"morningAvg":0.58,"afternoonAvg":0.578,"close":0.635,"closePos":"near high"},{"date":"2026-07-07","series":"S50Z26","fu":1057.2,"vol":0.369,"totalPre":84.2,"volRange":[0.311,0.398],"morningAvg":0.355,"afternoonAvg":0.383,"close":0.396,"closePos":"near high"},{"date":"2026-07-07","series":"S50U26","fu":1057.7,"vol":0.556,"totalPre":56.4,"volRange":[0.507,0.6],"morningAvg":0.526,"afternoonAvg":0.581,"close":0.595,"closePos":"near high"},{"date":"2026-07-06","series":"S50Z26","fu":1062.5,"vol":0.361,"totalPre":84.1,"volRange":[0.297,0.509],"morningAvg":0.409,"afternoonAvg":0.311,"close":0.301,"closePos":"near low"},{"date":"2026-07-06","series":"S50U26","fu":1063.9,"vol":0.556,"totalPre":58.1,"volRange":[0.524,0.621],"morningAvg":0.576,"afternoonAvg":0.539,"close":0.525,"closePos":"near low"},{"date":"2026-07-03","series":"S50Z26","fu":1064.0,"vol":0.725,"totalPre":81.1,"volRange":[0.447,1.252],"morningAvg":1.022,"afternoonAvg":0.455,"close":0.459,"closePos":"near low","flag":"artifact"},{"date":"2026-07-03","series":"S50U26","fu":1065.5,"vol":0.616,"totalPre":59.9,"volRange":[0.564,0.635],"morningAvg":0.605,"afternoonAvg":0.625,"close":0.625,"closePos":"near high"},{"date":"2026-07-02","series":"S50Z26","fu":1048.0,"vol":0.923,"totalPre":88.8,"volRange":[0.353,1.112],"morningAvg":0.741,"afternoonAvg":1.101,"close":1.111,"closePos":"near high","flag":"artifact"},{"date":"2026-07-02","series":"S50U26","fu":1049.6,"vol":0.538,"totalPre":63.0,"volRange":[0.512,0.561],"morningAvg":0.528,"afternoonAvg":0.547,"close":0.557,"closePos":"near high"},{"date":"2026-07-01","series":"S50Z26","fu":1040.0,"vol":0.401,"totalPre":87.0,"volRange":[0.345,0.477],"morningAvg":0.43,"afternoonAvg":0.375,"close":0.346,"closePos":"near low"},{"date":"2026-07-01","series":"S50U26","fu":1041.5,"vol":0.603,"totalPre":63.5,"volRange":[0.539,0.636],"morningAvg":0.619,"afternoonAvg":0.589,"close":0.539,"closePos":"near low"},{"date":"2026-06-30","series":"S50Z26","fu":1045.2,"vol":0.359,"totalPre":99.0,"volRange":[0.311,0.396],"morningAvg":0.339,"afternoonAvg":0.374,"close":0.396,"closePos":"near high"},{"date":"2026-06-30","series":"S50U26","fu":1047.1,"vol":0.551,"totalPre":64.7,"volRange":[0.514,0.593],"morningAvg":0.537,"afternoonAvg":0.564,"close":0.593,"closePos":"near high"},{"date":"2026-06-29","series":"S50U26","fu":1031.2,"vol":0.425,"totalPre":66.0,"volRange":[0.409,0.443],"morningAvg":0.422,"afternoonAvg":0.428,"close":0.442,"closePos":"near high","note":"M26 expiry day"},{"date":"2026-06-26","series":"S50U26","fu":1013.3,"vol":0.487,"totalPre":71.2,"volRange":[0.478,0.499],"morningAvg":0.489,"afternoonAvg":0.485,"close":0.486,"closePos":"low-mid"}]};
+/*PDGS_DATA_END*/
+var pdgsCharts={};
+// Cloud-first data source: the pdgs-daily-collector skill upserts the full
+// dataset into Supabase desk_kv under key s50_pdgs (per-user, RLS-protected —
+// nothing public). The LS cloud layer pulls it at boot like every other
+// s50_ key, so any logged-in device sees it. The embedded PDGS_DATA block is
+// the offline/deploy-time fallback. Source is labeled in the note (provenance).
+var _pdgsSrcLabel='embedded';
+function pdgsSource(){
+  try{
+    var c=LS.getItem('s50_pdgs');
+    if(c){var j=JSON.parse(c);
+      if(j&&j.days&&j.days.length&&(!PDGS_DATA.updated||(j.updated&&j.updated>=PDGS_DATA.updated))){_pdgsSrcLabel='cloud';return j;}}
+  }catch(e){}
+  _pdgsSrcLabel='embedded';return PDGS_DATA;
+}
+function renderPdgsCharts(){
+  var el=document.getElementById('pdgs-note');if(!el)return;
+  var _src=pdgsSource();
+  var days=(_src&&_src.days)||[];
+  ['vol','prem'].forEach(function(k){if(pdgsCharts[k]){pdgsCharts[k].destroy();pdgsCharts[k]=null;}});
+  if(!days.length){el.textContent='No PDGS data yet — run the pdgs-daily-collector skill in the PDGS chat to fill this.';return;}
+  var dates=[];days.forEach(function(d){if(dates.indexOf(d.date)<0)dates.push(d.date);});
+  dates.sort();
+  var series=[];days.forEach(function(d){if(series.indexOf(d.series)<0)series.push(d.series);});
+  series.sort();
+  var colors=['#ffaa00','#b478ff','#44aaff','#00e59a'];
+  function byDate(ser,fld,skipArtifact){
+    return dates.map(function(dt){
+      var r=days.find(function(d){return d.date===dt&&d.series===ser;});
+      if(!r)return null;
+      if(skipArtifact&&r.flag==='artifact')return null;
+      return r[fld];
+    });
+  }
+  function mk(id,dss){
+    return new Chart(document.getElementById(id),{type:'line',data:{labels:dates.map(function(d){return d.slice(5);}),datasets:dss},
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:true,labels:{color:'#8899bb',boxWidth:14,font:{size:9}}}},
+        scales:{x:{grid:{color:'rgba(26,40,64,.7)'},ticks:{color:'#304060',maxTicksLimit:10,font:{size:9,family:'IBM Plex Mono'}},border:{color:'#1a2840'}},
+                y:{grid:{color:'rgba(26,40,64,.7)'},ticks:{color:'#304060',font:{size:9,family:'IBM Plex Mono'}},border:{color:'#1a2840'}}},
+        animation:{duration:200},spanGaps:true}});
+  }
+  pdgsCharts.vol=mk('pdgs-vol',series.map(function(s,i){return{label:s+' PDGS Vol',data:byDate(s,'vol',true),borderColor:colors[i%4],borderWidth:2,fill:false,tension:0.2,pointRadius:2};}));
+  pdgsCharts.prem=mk('pdgs-prem',series.map(function(s,i){return{label:s+' Total Pre (pts)',data:byDate(s,'totalPre',false),borderColor:colors[i%4],borderWidth:2,fill:false,tension:0.2,pointRadius:2};}));
+  var latest=days.filter(function(d){return d.date===dates[dates.length-1];});
+  var txt='['+_pdgsSrcLabel+'] '+(_src.updated?'Updated '+_src.updated+' · ':'')+latest.map(function(r){
+    var prev=null;
+    for(var i=dates.length-2;i>=0&&!prev;i--)prev=days.find(function(d){return d.date===dates[i]&&d.series===r.series;});
+    var dv=prev?(r.vol-prev.vol):null,dp=prev?(r.totalPre-prev.totalPre):null;
+    return r.series+': Vol '+r.vol+(dv!==null?' ('+(dv>=0?'+':'')+dv.toFixed(3)+')':'')+', Pre '+r.totalPre+(dp!==null?' ('+(dp>=0?'+':'')+dp.toFixed(1)+')':'')+(r.closePos?', close '+r.closePos:'');
+  }).join(' · ');
+  var nArt=days.filter(function(d){return d.flag==='artifact';}).length;
+  if(nArt)txt+=' · '+nArt+' artifact day(s) excluded from Vol lines';
+  el.textContent=txt;
+}
 function loadHistEntry(i){var h=histDB[i];document.getElementById('i-spot').value=h.spot;document.getElementById('i-fut').value=h.fut;buildSmile(h);renderChainReal(h);document.getElementById('chain-lbl').textContent=h.series+' - '+h.date;ua();}
 function delHist(i){if(confirm('Delete this day?')){histDB.splice(i,1);saveState();renderHist();}}
 function renderCmp(){
@@ -3394,11 +3589,6 @@ function renderTopbar(){
     else if(dte<=9){dteChip.style.cssText='background:rgba(255,170,0,.15);color:var(--amber);border:1px solid var(--amber);display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;font-family:IBM Plex Mono,monospace;margin-left:4px';}
     else{dteChip.style.cssText='background:transparent;color:var(--text3);border:1px solid var(--border);display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:400;font-family:IBM Plex Mono,monospace;margin-left:4px';}
   }
-  // FIX: live front-series label in topbar banner (was hardcoded S50M26)
-  var _fs=getDefaultSeries();
-  var _tbSer=document.getElementById('tb-series'); if(_tbSer)_tbSer.textContent=_fs;
-  var _tbExp=document.getElementById('tb-expiry-lbl'); var _fex=seriesExpiry(_fs);
-  if(_tbExp&&_fex){var _MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];_tbExp.textContent=_MON[_fex.getMonth()]+' '+_fex.getFullYear();}
   renderSBSummary(inp);
 }
 function renderSBSummary(inp){
@@ -3850,6 +4040,13 @@ function renderDTEBanner(){
   if(!el)return;
   var dte=inp.dte;
   var mat=document.getElementById('i-maturity').value||'';
+  // Topbar series/expiry auto-label (deploy tweak, now in-source): follow the
+  // actual front series instead of the hardcoded template values.
+  var _ser=getDefaultSeries();
+  var _tbS=document.getElementById('tb-series');if(_tbS)_tbS.textContent=_ser;
+  var _tbE=document.getElementById('tb-expiry-lbl');
+  if(_tbE){var _xd=seriesExpiry(_ser);
+    if(_xd)_tbE.textContent=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][_xd.getMonth()]+' '+_xd.getFullYear();}
   var chip=document.getElementById('tb-dte-chip');
   if(chip){
     if(dte<=3){chip.textContent='DTE '+dte;chip.style.cssText='background:rgba(255,68,102,.2);color:var(--red);border:1px solid var(--red);display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;font-family:IBM Plex Mono';}
@@ -4509,6 +4706,7 @@ loadInputs();updateDTE();
 try{ if(SEED_OK) LS.setItem('s50_seeded','1'); }catch(e){}
 prefillImport();
 renderHist();
+piFillFields(); // v7g: restore device-local broker fields (never cloud-synced)
 renderFutQ(); // v7d
 refreshSmile();
 ua();
