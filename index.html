@@ -739,8 +739,9 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Barlow
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
           <button class="btn btn-g btn-sm" id="pi-connect-btn" onclick="piConnect()">Connect</button>
           <button class="btn btn-gh btn-sm" onclick="piDisconnect()">Disconnect</button>
-          <button class="btn btn-c btn-sm" onclick="piPullChain()" title="ดึง chain สดของ series ในช่อง Series prefix ด้านล่าง แล้ว save เป็นข้อมูลของวันนี้ (ผ่าน QC ตามปกติ)">Pull chain &amp; save</button>
+          <button class="btn btn-c btn-sm" onclick="piPullChain()" title="ดึง option chain สดของทุกซีรีส์ quarterly ที่ active (U26 + Z26) แล้ว save เป็นข้อมูลวันนี้ ผ่าน QC ตามปกติ">Pull chains &amp; save</button>
           <button class="btn btn-a btn-sm" onclick="piSyncPositions()" title="ดึง positions จริงจากบัญชี มาเป็น Order Text preview — ไม่แตะ book จนกว่าจะกด Apply">Sync positions → Order Text</button>
+          <label style="display:flex;align-items:center;gap:4px;color:var(--text2);cursor:pointer;font-size:10px" title="ดึง chain ซ้ำอัตโนมัติทุก 30 วินาที (โหลดหนักกว่า quote poll)"><input type="checkbox" id="pi-autochain" onchange="piAutoChainToggle()" style="accent-color:#38bdf8">auto-refresh chain 30s</label>
           <span style="font-size:10px;color:var(--text3)">ต้องรัน <span class="mono">python3 pi_connector.py</span> ใน SET50_Trading ก่อน (ทดสอบไม่ใช้ key จริง: <span class="mono">--mock</span>)</span>
         </div>
       </div>
@@ -2564,6 +2565,7 @@ function piConnect(){
 }
 function piDisconnect(){
   if(piState.timer)clearInterval(piState.timer);
+  if(_piAutoChainTimer){clearInterval(_piAutoChainTimer);_piAutoChainTimer=null;var ac=document.getElementById('pi-autochain');if(ac)ac.checked=false;}
   piState.timer=null;piState.connected=false;piMsg('offline');
 }
 function piPoll(){
@@ -2598,11 +2600,11 @@ function piPoll(){
     if(piState.fail>=5){piDisconnect();piMsg('หลุดการเชื่อมต่อ — connector ปิด?',false);}
   });
 }
-// Which option series to pull: the box value if the user set one, else every
-// active quarterly (front + next) so both S50U26 and S50Z26 come in together.
+// Always pull EVERY active quarterly option series (front + next), so U26 and
+// Z26 come in together. Independent of the import box (the box gets set during
+// the loop for saveImport, then restored — otherwise the next click would only
+// see the last series and pull one).
 function piOptionSeries(){
-  var typed=(_piVal('im-series')||'').toUpperCase();
-  if(typed)return [typed];
   var out=[],today=new Date(),y=today.getFullYear(),mo=today.getMonth()+1;
   var Q={3:'H',6:'M',9:'U',12:'Z'};
   var yy=y,mm=mo;
@@ -2612,17 +2614,22 @@ function piOptionSeries(){
   }
   return out;
 }
-function piPullChain(){
+function piPullChain(silent){
   var list=piOptionSeries();
-  var done=0,okN=0,msgs=[];
-  piMsg('pulling '+list.length+' chain(s)…');
+  var okN=0,msgs=[];
+  var origSeries=(document.getElementById('im-series')||{}).value||'';
+  var origDate=(document.getElementById('im-date')||{}).value||'';
+  if(!silent)piMsg('pulling '+list.length+' chains…');
+  function done(){
+    var el=document.getElementById('im-series');if(el)el.value=origSeries;
+    var dl=document.getElementById('im-date');if(dl)dl.value=origDate;
+    if(typeof onImSeriesChange==='function')onImSeriesChange();
+    var msg=document.getElementById('im-msg');
+    if(msg)msg.innerHTML='<div class="alert '+(okN?'al-g':'al-r')+'">Pi live chains '+new Date().toTimeString().slice(0,8)+': '+msgs.join(' · ')+'</div>';
+    piMsg(okN?('chains '+okN+'/'+list.length+' '+new Date().toTimeString().slice(0,8)):'chain pull failed',okN>0);
+  }
   function next(i){
-    if(i>=list.length){
-      var msg=document.getElementById('im-msg');
-      if(msg)msg.innerHTML='<div class="alert '+(okN?'al-g':'al-r')+'">Pi live chain: '+msgs.join(' · ')+'</div>';
-      piMsg(okN?('chains saved: '+okN+'/'+list.length):'chain pull failed',okN>0);
-      return;
-    }
+    if(i>=list.length)return done();
     var series=list[i];
     fetch(piUrl()+'/chain/'+series).then(function(r){return r.json();}).then(function(c){
       if(c.error)throw new Error(c.error);
@@ -2634,12 +2641,23 @@ function piPullChain(){
       var spEl=document.getElementById('im-spot');if(spEl)spEl.value=sp;
       if(typeof onImSeriesChange==='function')onImSeriesChange();
       saveImport();
-      okN++;msgs.push(series+' '+c.rows.length+'r'+(c.mode==='mock'?'(MOCK)':''));
+      var strikes={};c.rows.forEach(function(r){strikes[r.strike]=1;});
+      var ks=Object.keys(strikes).map(Number).sort(function(a,b){return a-b;});
+      okN++;msgs.push(series+' '+c.rows.length+'r ['+(ks[0]||'?')+'–'+(ks[ks.length-1]||'?')+']'+(c.mode==='mock'?'(MOCK)':''));
     }).catch(function(e){
       msgs.push(series+' ✗ '+e.message);
     }).then(function(){next(i+1);});
   }
   next(0);
+}
+var _piAutoChainTimer=null;
+function piAutoChainToggle(){
+  var on=document.getElementById('pi-autochain');
+  if(on&&on.checked){
+    if(_piAutoChainTimer)clearInterval(_piAutoChainTimer);
+    _piAutoChainTimer=setInterval(function(){if(piState.connected)piPullChain(true);},30000);
+    piPullChain(true);
+  }else if(_piAutoChainTimer){clearInterval(_piAutoChainTimer);_piAutoChainTimer=null;}
 }
 function piSyncPositions(){
   piMsg('pulling positions…');
