@@ -1856,7 +1856,7 @@ function renderTfex(){
     trades.forEach(function(t){if(t.dir==='long'){netLong+=t.lots;longCost+=t.lots*t.price;}else{netShort+=t.lots;shortCost+=t.lots*t.price;}});
     var avgL=netLong?longCost/netLong:0,avgS=netShort?shortCost/netShort:0;
     var net=netLong-netShort;
-    var curF=tfexFutPrice(s,undefined,inp);
+    var curF=tfexMarkPrice(s); // v7h: same mark as All-positions/topbar (broker > pi-live > fallback)
     var longPnl=netLong?(curF-avgL)*netLong*200:0;
     var shortPnl=netShort?(avgS-curF)*netShort*200:0;
     var totalPnl=longPnl+shortPnl;
@@ -1896,21 +1896,21 @@ function renderTfex(){
   var totalLong=0,totalShort=0,totalLongCost=0,totalShortCost=0;
   tfexTrades.forEach(function(t){if(t.dir==='long'){totalLong+=t.lots;totalLongCost+=t.lots*t.price;}else{totalShort+=t.lots;totalShortCost+=t.lots*t.price;}});
   var avgL2=totalLong?totalLongCost/totalLong:0,avgS2=totalShort?totalShortCost/totalShort:0;
-  var totalPnl2=tfexNetPnL(inp.S)*200; // per-series futures prices
+  var totalPnl2=bookMarkPnL(false).tfx*200; // v7h: unified mark-based P&L
   var netTotal=totalLong-totalShort;
   document.getElementById('tfex-pnl-met').innerHTML=
     '<div class="met"><div class="ml">Total long</div><div class="mv" style="color:var(--green)">'+totalLong+'</div><div class="ms">avg '+avgL2.toFixed(1)+'</div></div>'+
     '<div class="met"><div class="ml">Total short</div><div class="mv" style="color:var(--red)">'+totalShort+'</div><div class="ms">avg '+avgS2.toFixed(1)+'</div></div>'+
     '<div class="met"><div class="ml">Net lots</div><div class="mv" style="color:'+(netTotal>0?'var(--green)':netTotal<0?'var(--red)':'var(--text3)')+'">'+netTotal+'</div><div class="ms">'+(netTotal>0?'long':netTotal<0?'short':'flat')+'</div></div>'+
-    '<div class="met"><div class="ml">Total TFEX P&L</div><div class="mv" style="color:'+cv(totalPnl2)+';font-size:14px">'+fb(totalPnl2)+'</div><div class="ms">vs spot '+inp.S+'</div></div>';
-  document.getElementById('tfex-total-alert').innerHTML=totalPnl2>=0?'<div class="alert al-g">TFEX positions profitable at current spot '+inp.S+'</div>':'<div class="alert al-r">TFEX positions in loss at current spot '+inp.S+'. Review hedge ratio.</div>';
+    '<div class="met"><div class="ml">Total TFEX P&L</div><div class="mv" style="color:'+cv(totalPnl2)+';font-size:14px">'+fb(totalPnl2)+'</div><div class="ms">mark ต่อซีรีส์</div></div>';
+  document.getElementById('tfex-total-alert').innerHTML=totalPnl2>=0?'<div class="alert al-g">TFEX positions profitable at current marks (ราคาต่อซีรีส์จริง)</div>':'<div class="alert al-r">TFEX positions in loss at current marks. Review hedge ratio.</div>';
 
   // Full log
   if(!tfexTrades.length){document.getElementById('tfex-log').innerHTML='<div class="empty">No trade entries</div>';return;}
-  var logHTML='<table class="pos-table"><thead><tr><th>Date</th><th>Series</th><th>Action</th><th>Direction</th><th>Lots</th><th>Price</th><th>P&L vs spot</th><th>Note</th><th></th></tr></thead><tbody>';
+  var logHTML='<table class="pos-table"><thead><tr><th>Date</th><th>Series</th><th>Action</th><th>Direction</th><th>Lots</th><th>Price</th><th>P&L (mark)</th><th>Note</th><th></th></tr></thead><tbody>';
   var sorted=[].concat(tfexTrades).sort(function(a,b){return b.date.localeCompare(a.date);});
   sorted.forEach(function(t){
-    var curF2=tfexFutPrice(t.series,undefined,inp);var entryPnl=t.dir==='long'?(curF2-t.price)*t.lots*200:(t.price-curF2)*t.lots*200;
+    var curF2=tfexMarkPrice(t.series);var entryPnl=t.dir==='long'?(curF2-t.price)*t.lots*200:(t.price-curF2)*t.lots*200;
     var rowClass=t.dir==='long'?'long-row':'short-row';
     var actTag='<span class="tag '+(t.action==='open'?'tc':t.action==='add'?'tg':t.action==='close'?'tr':t.action==='roll'?'tp':'ta')+'">'+t.action.toUpperCase()+'</span>';
     logHTML+='<tr class="'+rowClass+'">';
@@ -2692,6 +2692,17 @@ function piSyncPositions(){
       // come from the broker. Reconciliation, if wanted, belongs at account level.
       if(x.mkt!=null)window.piMarks[key]={mkt:x.mkt,mult:x.mult||200};
     });
+    // Account truth from the broker (equity/cash/excess/liquidation) — kept
+    // DEVICE-LOCAL via _realLS (pi_* namespace, never cloud-synced); snapshots
+    // in the Position Book embed a copy only when the user explicitly saves.
+    if(p.account){
+      window.piAccount={
+        equity:p.account.equity,cash:p.account.cashBalance,
+        excess:p.account.excessEquity,liq:p.account.liquidationValue,
+        im:p.account.initialMargin,callForce:p.account.callForceFlag,
+        ts:Date.now(),asOf:new Date().toTimeString().slice(0,8)};
+      try{if(_realLS)_realLS.setItem('pi_account_last',JSON.stringify(window.piAccount));}catch(e){}
+    }
     var txt='# Pi positions '+new Date().toISOString().slice(0,10)+(p.mode==='mock'?' (MOCK)':'')+'\n'+
       p.positions.map(function(x){return x.orderText;}).join('\n');
     var ot=document.getElementById('ot-input');
@@ -3970,20 +3981,48 @@ function renderTopbar(){
   }
   renderSBSummary(inp);
 }
+function piAccountNow(){
+  if(window.piAccount)return window.piAccount;
+  try{if(_realLS){var s=_realLS.getItem('pi_account_last');if(s){window.piAccount=JSON.parse(s);return window.piAccount;}}}catch(e){}
+  return null;
+}
 function renderSBSummary(inp){
-  if(!legs.length){document.getElementById('sb-summary').textContent='No legs';return;}
-  var premPts=totalPrem();var stopPts=Math.min(Math.abs(premPts)*2,inp.cap/200);var g=portG();var curPnl=portPnL(inp.S);var tfxN=tfexNetLots();
-  document.getElementById('sb-summary').innerHTML='<div style="display:flex;flex-direction:column;gap:4px;font-size:11px">'+
-    '<div style="display:flex;justify-content:space-between"><span style="color:var(--text3)">Total P&L</span><span class="mono" style="color:'+cv(curPnl)+'">'+fc(+curPnl.toFixed(2))+' pts</span></div>'+
-    '<div style="display:flex;justify-content:space-between"><span style="color:var(--text3)">TFEX net</span><span class="mono" style="color:'+(tfxN>0?'var(--green)':tfxN<0?'var(--red)':'var(--text3)')+'">'+( tfxN===0?'flat':(tfxN>0?'+':'')+tfxN+' lots')+'</span></div>'+
-    '<div style="display:flex;justify-content:space-between"><span style="color:var(--text3)">Net prem</span><span class="mono" style="color:'+cv(premPts)+'">'+fc(premPts)+' pts</span></div>'+
-    '<div style="display:flex;justify-content:space-between"><span style="color:var(--text3)">Hard stop</span><span class="mono" style="color:var(--red)">-'+f(stopPts)+' pts</span></div>'+
-    '<div style="display:flex;justify-content:space-between"><span style="color:var(--text3)">50% target</span><span class="mono" style="color:var(--green)">'+f(Math.abs(premPts)*0.5)+' pts</span></div>'+
-    '<div style="display:flex;justify-content:space-between"><span style="color:var(--text3)">Opt P&L</span><span class="mono" style="color:'+cv(curPnl)+'">'+fc(+curPnl.toFixed(2))+'</span></div>'+
-    '<div style="display:flex;justify-content:space-between"><span style="color:var(--text3)">Theta</span><span class="mono" style="color:var(--amber)">'+f(g.Th,3)+'</span></div>'+
-    '<div style="display:flex;justify-content:space-between"><span style="color:var(--text3)">Delta</span><span class="mono">'+f(g.D,2)+'</span></div>'+
-    '<div style="display:flex;justify-content:space-between"><span style="color:var(--text3)">Legs</span><span class="mono">'+legs.length+'</span></div>'+
-    '</div>';
+  if(!legs.length&&!tfexTrades.length){document.getElementById('sb-summary').textContent='No legs';return;}
+  var premPts=totalPrem();var stopPts=Math.min(Math.abs(premPts)*2,inp.cap/200);var g=portG();var tfxN=tfexNetLots();
+  // v7h: all "now" numbers from the unified mark layer (same as table/topbar)
+  var mk=bookMarkPnL(false);
+  var optLots=legs.reduce(function(s,l){return s+l.lots;},0);
+  var futLots=tfexTrades.reduce(function(s,t){return s+t.lots;},0);
+  function row(lbl,val,col,tip){return '<div style="display:flex;justify-content:space-between"'+(tip?' title="'+tip+'"':'')+'><span style="color:var(--text3)">'+lbl+'</span><span class="mono"'+(col?' style="color:'+col+'"':'')+'>'+val+'</span></div>';}
+  var h='<div style="display:flex;flex-direction:column;gap:4px;font-size:11px">'+
+    row('Total P&L',fc(+mk.total.toFixed(2))+' pts',cv(mk.total),'mark-based: ตรงกับตาราง All positions')+
+    row('TFEX Total P&L',fc(+mk.tfx.toFixed(2))+' pts',cv(mk.tfx))+
+    row('TFEX net',(tfxN===0?'flat':(tfxN>0?'+':'')+tfxN+' lots'),(tfxN>0?'var(--green)':tfxN<0?'var(--red)':'var(--text3)'))+
+    row('Net prem',fc(premPts)+' pts',cv(premPts),'ลบ = net SHORT (รับ premium สุทธิ)')+
+    row('Hard stop','-'+f(stopPts)+' pts','var(--red)')+
+    row('50% target',f(Math.abs(premPts)*0.5)+' pts','var(--green)')+
+    row('Opt P&L',fc(+mk.opt.toFixed(2)),cv(mk.opt))+
+    row('Theta',f(g.Th,3),'var(--amber)')+
+    row('Delta',f(g.D,2),'')+
+    row('Legs',legs.length,'')+
+    row('Total contracts',(optLots+futLots)+' ('+optLots+' opt + '+futLots+' fut)','','จำนวนสัญญารวม option + futures');
+  // Account truth (Pi) — bottom section
+  var acct=piAccountNow();
+  h+='<div style="border-top:1px solid var(--border);margin-top:5px;padding-top:5px">';
+  if(acct){
+    var fmtB=function(v){return v==null?'—':'฿'+Math.round(v).toLocaleString();};
+    h+='<div style="color:var(--text3);font-size:9px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">Account (Pi'+(acct.asOf?' · '+acct.asOf:'')+')</div>'+
+      row('Equity',fmtB(acct.equity),'var(--text)')+
+      row('Cash',fmtB(acct.cash),'')+
+      row('Excess equity',fmtB(acct.excess),'var(--green)','เงินที่ถอน/เปิดเพิ่มได้')+
+      row('Liquidation value',fmtB(acct.liq),'var(--cyan)','เลิกทุกไม้ตอนนี้เหลือเท่านี้ — ตัวเลขความจริงที่สุด')+
+      row('Initial margin',fmtB(acct.im),'');
+    if(acct.callForce&&acct.callForce!=='No')h+=row('⚠ CALL/FORCE',acct.callForce,'var(--red)');
+  }else{
+    h+='<div style="color:var(--text3);font-size:10px">Account truth: กด Sync positions จาก Pi เพื่อดึงข้อมูลบัญชี</div>';
+  }
+  h+='</div></div>';
+  document.getElementById('sb-summary').innerHTML=h;
 }
 
 // ============================================================
@@ -4082,9 +4121,13 @@ function bookSnapshot(name, date, status, notes) {
     tfexTrades: JSON.parse(JSON.stringify(tfexTrades)),
     // Greeks at time of save
     greeks: portG(),
-    // P&L at time of save
+    // P&L at time of save (v7h: mark-based, same as everything else)
     totalPremPts: totalPrem(),
-    curPnlPts: portPnL(inp.S)
+    curPnlPts: bookMarkPnL(false).total,
+    // v7h: account truth at time of save (equity/cash/excess/liquidation from
+    // Pi) — lets the book answer "พอร์ตโตขึ้นหรือลดลง" over time. null when
+    // the broker hasn't been synced.
+    account: (typeof piAccountNow==='function'?piAccountNow():null)
   };
 }
 
@@ -4217,6 +4260,17 @@ function bookRender() {
       }).join('');
       var pnlCol = snap.curPnlPts>=0?'var(--green)':'var(--red)';
       var pnlStr = snap.curPnlPts!==undefined?((snap.curPnlPts>=0?'+':'')+snap.curPnlPts.toFixed(1)+' pts'):'—';
+      // v7h: account truth badge — equity + liquidation at save time, with
+      // growth vs the PREVIOUS snapshot that also carried account data.
+      var acctStr='';
+      if(snap.account&&snap.account.equity!=null){
+        var prevA=null;
+        for(var pi2=ri+1;pi2<posBook.length;pi2++){if(posBook[pi2].account&&posBook[pi2].account.equity!=null){prevA=posBook[pi2].account;break;}}
+        var dEq=prevA?snap.account.equity-prevA.equity:null;
+        acctStr='<span class="mono" style="font-size:10px;color:var(--cyan)" title="Account ณ วัน save — Equity / Liquidation'+(dEq!=null?' · เทียบ snapshot ก่อนหน้า':'')+'">Eq ฿'+Math.round(snap.account.equity).toLocaleString()+
+          (snap.account.liq!=null?' · Liq ฿'+Math.round(snap.account.liq).toLocaleString():'')+
+          (dEq!=null?' <span style="color:'+(dEq>=0?'var(--green)':'var(--red)')+'">('+(dEq>=0?'+':'')+Math.round(dEq).toLocaleString()+')</span>':'')+'</span>';
+      }
       return '<div class="bk-card bk-'+snap.status+'">' +
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;flex-wrap:wrap;gap:5px">' +
           '<div style="display:flex;align-items:center;gap:8px">' +
@@ -4224,6 +4278,7 @@ function bookRender() {
             '<span class="tag" style="background:transparent;color:'+statusCol+';border:1px solid '+statusCol+';font-size:9px">'+snap.status.toUpperCase()+'</span>' +
           '</div>' +
           '<div style="display:flex;align-items:center;gap:5px;flex-shrink:0">' +
+            acctStr +
             '<span class="mono" style="font-size:10px;color:var(--text3)">'+snap.date+'</span>' +
             '<span class="mono" style="font-size:12px;font-weight:700;color:'+pnlCol+'">'+pnlStr+'</span>' +
           '</div>' +
