@@ -2127,16 +2127,19 @@ function renderPayoff(){
   var maxP=expiryPL.reduce(function(a,b){return a>b?a:b;},-Infinity);
   var minP=expiryPL.reduce(function(a,b){return a<b?a:b;},Infinity);
   var stopPts=Math.min(Math.abs(premPts)*2,inp.cap/200);
-  var optPnl=portPnLOpts(S);var tfxPnl=tfexNetPnL(S);var tfxLots=tfexNetLots();
+  var tfxLots=tfexNetLots();
+  // v7h: "now" cards use the SAME marks as the All-positions table (broker/mid),
+  // not the model curve — so cards, table and topbar always agree.
+  var mk=bookMarkPnL(true);
   document.getElementById('pf-met').innerHTML=
-    '<div class="met"><div class="ml">Total P&L now</div><div class="mv" style="color:'+cv(curToday)+'">'+fc(+curToday.toFixed(2))+'</div><div class="ms">'+fb(curToday*200)+'</div></div>'+
-    '<div class="met"><div class="ml">Options P&L</div><div class="mv" style="color:'+cv(optPnl)+'">'+fc(+optPnl.toFixed(2))+'</div><div class="ms">'+fb(optPnl*200)+'</div></div>'+
-    '<div class="met"><div class="ml">TFEX P&L</div><div class="mv" style="color:'+cv(tfxPnl)+';font-size:13px">'+(tfxLots?fc(+tfxPnl.toFixed(2)):'flat')+'</div><div class="ms">'+(tfxLots?fb(tfxPnl*200):'no pos')+'</div></div>'+
+    '<div class="met"><div class="ml">Total P&L now</div><div class="mv" style="color:'+cv(mk.total)+'">'+fc(+mk.total.toFixed(2))+'</div><div class="ms">'+fb(mk.total*200)+'</div></div>'+
+    '<div class="met"><div class="ml">Options P&L</div><div class="mv" style="color:'+cv(mk.opt)+'">'+fc(+mk.opt.toFixed(2))+'</div><div class="ms">'+fb(mk.opt*200)+'</div></div>'+
+    '<div class="met"><div class="ml">TFEX P&L</div><div class="mv" style="color:'+cv(mk.tfx)+';font-size:13px">'+(tfxLots?fc(+mk.tfx.toFixed(2)):'flat')+'</div><div class="ms">'+(tfxLots?fb(mk.tfx*200):'no pos')+'</div></div>'+
     '<div class="met"><div class="ml">Max gain</div><div class="mv" style="color:var(--green)">'+f(maxP)+'</div><div class="ms">'+fb(maxP*200)+'</div></div>'+
     '<div class="met"><div class="ml">Max loss</div><div class="mv" style="color:var(--red)">'+f(minP)+'</div><div class="ms">'+fb(minP*200)+'</div></div>'+
     '<div class="met"><div class="ml">Hard stop</div><div class="mv" style="color:var(--red)">-'+f(stopPts)+'</div><div class="ms">'+fb(-stopPts*200)+'</div></div>'+
     '<div class="met"><div class="ml">50% target</div><div class="mv" style="color:var(--green)">'+f(Math.abs(premPts)*0.5)+'</div><div class="ms">'+fb(Math.abs(premPts)*0.5*200)+'</div></div>'+
-    '<div class="met"><div class="ml">Net prem</div><div class="mv" style="color:'+cv(premPts)+'">'+fc(premPts)+'</div><div class="ms">'+fb(premPts*200)+'</div></div>';
+    '<div class="met" title="Σ(ทิศ × premium ทุน × lots) ของ option ที่เปิดอยู่ — ค่าลบ = net SHORT (รับ premium สุทธิ) ไม่ใช่ขาดทุน"><div class="ml">Net prem</div><div class="mv" style="color:'+cv(premPts)+'">'+fc(premPts)+'</div><div class="ms">'+(premPts<0?'net SHORT รับ ฿'+Math.abs(Math.round(premPts*200)).toLocaleString():premPts>0?'net LONG จ่าย ฿'+Math.abs(Math.round(premPts*200)).toLocaleString():'฿0')+'</div></div>';
   // CHART
   var strikesLocal=strikes,expiryLocal=expiryPL,todayLocal=todayPL_,pmLocal=payoffMode;
   var beEL=beExpiry,beTL=beToday,SL=S,spotE=curExpiry,spotT=curToday;
@@ -2200,7 +2203,7 @@ function renderPayoff(){
     ['Theta/day',f(g.Th,3),g.Th>0?'var(--green)':'var(--red)'],
     ['Net gamma',f(g.G,4),g.G<0?'var(--red)':'var(--text2)'],
     ['Net vega',f(g.Ve,2),g.Ve<0?'var(--red)':'var(--green)'],
-    ['Today P/L',fc(+curToday.toFixed(1)),cv(curToday)],
+    ['Today P/L (mark)',fc(+mk.total.toFixed(1)),cv(mk.total)],
     ['Expiry P/L',fc(+curExpiry.toFixed(1)),cv(curExpiry)],
     ['Premium',fc(premPts),cv(premPts)],
   ].map(function(it){return '<div class="summary-item"><div class="summary-label">'+it[0]+'</div><div class="summary-val" style="color:'+it[2]+'">'+it[1]+'</div></div>';}).join('');
@@ -2682,7 +2685,12 @@ function piSyncPositions(){
     p.positions.forEach(function(x){
       var m=/^(S50[FGHJKMNQUVXZ]\d\d)([CP])(\d+)$/.exec(x.symbol);
       var key=m?(m[1]+'|'+(m[2]==='C'?'call':'put')+'|'+m[3]):(x.symbol+'|fut');
-      if(x.mkt!=null)window.piMarks[key]={mkt:x.mkt,upnl:x.brokerUpnl,mult:x.mult||200};
+      // Store broker mark + mult only. The SDK's *UnrealizePL field is a DAILY
+      // (settlement-reset) figure, not the cumulative P/L the Desk shows, so it
+      // is NOT used for a per-row cross-check (that produced false ⚠ on futures).
+      // Desk P/L is broker-exact by construction: mark, cost, lots, mult all
+      // come from the broker. Reconciliation, if wanted, belongs at account level.
+      if(x.mkt!=null)window.piMarks[key]={mkt:x.mkt,mult:x.mult||200};
     });
     var txt='# Pi positions '+new Date().toISOString().slice(0,10)+(p.mode==='mock'?' (MOCK)':'')+'\n'+
       p.positions.map(function(x){return x.orderText;}).join('\n');
@@ -2867,6 +2875,57 @@ function absShouldShort(series){
   var v=vrpFor(series);
   if(v.vrp===null)return null;      // not enough data — don't gate
   return v.vrp>0;                   // premium rich vs realized -> ok to short
+}
+
+// ── MARK-BASED "NOW" P&L (v7h) ──────────────────────────────────
+// Single source of truth for every "current P&L" number (topbar, payoff
+// metric cards, summary bar) so they always agree with the All-positions
+// table. Same mark chain as the table: broker mark (Pi) > chain mid >
+// chain last > BS model; futures: broker mark > futQuotes (pi-live, knows
+// far series like H27) > tfexFutPrice fallback. The payoff CURVES stay
+// model-based (they must reprice across spot) — cards are marks, curves are
+// model, and both are labeled.
+function _piMkNow(){return (window.piMarks&&(Date.now()-window.piMarks.ts<24*3600*1000))?window.piMarks:null;}
+function legMarkPrice(l){
+  var ser=l.series||'S50M26';
+  var bm=_piMkNow();bm=bm?bm[ser+'|'+l.type+'|'+l.K]:null;
+  if(bm&&bm.mkt>0)return{p:bm.mkt,src:'Pi'};
+  var entry=histDB.find(function(h){return h.series===ser&&h.rows&&h.rows.length;});
+  if(entry){
+    var row=entry.rows.find(function(r){return r.strike===l.K&&r.type===l.type;});
+    if(row){
+      var mid=(row.bid>0&&row.offer>0&&row.offer>=row.bid)?(row.bid+row.offer)/2:(row.bid>0?row.bid:0);
+      if(mid>0)return{p:mid,src:'Mid'};
+      if(row.last>0)return{p:row.last,src:'Last'};
+    }
+  }
+  var inp=gi();
+  var sig=getSmileSigma(l.K,l.type,inp.iv/100,ser);
+  var F=legFutPrice(l,undefined,inp);
+  return{p:bsp(F,l.K,Math.max(l.dte,0)/365,0,sig,l.type),src:'BS'};
+}
+function tfexMarkPrice(series){
+  series=series||'S50M26';
+  var bm=_piMkNow();bm=bm?bm[series+'|fut']:null;
+  if(bm&&bm.mkt>0)return bm.mkt;
+  var q=(typeof futQuotes!=='undefined')&&futQuotes[series];
+  if(q&&q.F>0)return q.F;
+  return tfexFutPrice(series,undefined,gi());
+}
+function bookMarkPnL(activeOnly){
+  if(activeOnly)initDashActiveSet();
+  var opt=0;
+  legs.forEach(function(l){
+    if(activeOnly&&!dashActiveSet.has('opt_'+l.id))return;
+    opt+=l.ls*(legMarkPrice(l).p-l.prem)*l.lots;
+  });
+  var tfx=0;
+  tfexTrades.forEach(function(t){
+    if(activeOnly&&!dashActiveSet.has('tfex_'+t.id))return;
+    var Ft=tfexMarkPrice(t.series);
+    tfx+=(t.dir==='long'?(Ft-t.price):(t.price-Ft))*t.lots;
+  });
+  return{opt:opt,tfx:tfx,total:opt+tfx};
 }
 
 function findBreakevens(strikes,vals){
@@ -3892,10 +3951,12 @@ function renderTopbar(){
   var g=portG();
   document.getElementById('tb-theta').textContent=f(g.Th,3);
   document.getElementById('tb-delta').textContent=f(g.D,2);document.getElementById('tb-delta').style.color=Math.abs(g.D)<1?'var(--green)':Math.abs(g.D)<5?'var(--amber)':'var(--red)';
-  var curPnl=portPnL(inp.S);
+  // v7h: topbar P&L uses the same marks as the All-positions table
+  var mkTb=bookMarkPnL(false);
+  var curPnl=mkTb.total;
   document.getElementById('tb-pnl').textContent=fc(+curPnl.toFixed(2));document.getElementById('tb-pnl').style.color=cv(curPnl);
   document.getElementById('tb-pnl-b').textContent='฿'+Math.round(curPnl*200).toLocaleString();
-  var tfxPnl=tfexNetPnL(inp.S)*200;
+  var tfxPnl=mkTb.tfx*200;
   document.getElementById('tb-tfex-pnl').textContent=fb(tfxPnl);document.getElementById('tb-tfex-pnl').style.color=cv(tfxPnl);
   var netLots=tfexNetLots();document.getElementById('tb-tfex-net').textContent=netLots>0?'long '+netLots:netLots<0?'short '+Math.abs(netLots):'flat';
   // DTE chip in topbar
