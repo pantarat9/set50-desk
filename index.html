@@ -2666,14 +2666,30 @@ function piSyncPositions(){
   fetch(piUrl()+'/portfolio').then(function(r){return r.json();}).then(function(p){
     if(p.error)throw new Error(p.error);
     if(!p.positions||!p.positions.length){
-      var extra=(p.raw_count?(' (got '+p.raw_count+' rows but none matched S50 — run /debug to check SDK shape)'):' (account empty or not logged in)');
+      var extra;
+      if(p.raw_count){
+        extra=' (got '+p.raw_count+' rows but none matched S50';
+        if(p.sample_keys)extra+='; fields: '+p.sample_keys.join(',');
+        extra+=')';
+        if(p.sample_row){try{console.log('Pi portfolio sample row:',p.sample_row);}catch(e){}}
+      }else extra=' (account empty or not logged in)';
       throw new Error('no S50 positions'+extra);
     }
+    // Stash the broker's own live mark + unrealized P/L keyed by series+type+strike
+    // (and futures series). renderPosTable reads this so MM val == streaming
+    // Mkt Price exactly, and we can cross-check the Desk's P/L vs the broker's.
+    window.piMarks={ts:Date.now()};
+    p.positions.forEach(function(x){
+      var m=/^(S50[FGHJKMNQUVXZ]\d\d)([CP])(\d+)$/.exec(x.symbol);
+      var key=m?(m[1]+'|'+(m[2]==='C'?'call':'put')+'|'+m[3]):(x.symbol+'|fut');
+      if(x.mkt!=null)window.piMarks[key]={mkt:x.mkt,upnl:x.brokerUpnl,mult:x.mult||200};
+    });
     var txt='# Pi positions '+new Date().toISOString().slice(0,10)+(p.mode==='mock'?' (MOCK)':'')+'\n'+
       p.positions.map(function(x){return x.orderText;}).join('\n');
     var ot=document.getElementById('ot-input');
     if(ot){ot.value=txt;otParse();}
-    piMsg(p.positions.length+' positions → Order Text preview (Payoff tab) — ตรวจแล้วกด Apply',true);
+    if(typeof ua==='function')ua(); // re-render tables so MM val picks up broker marks
+    piMsg(p.positions.length+' positions → Order Text preview + broker marks stored (MM val = โบรก)',true);
   }).catch(function(e){piMsg('positions fail: '+e.message,false);});
 }
 
@@ -2897,13 +2913,21 @@ function renderPosTable(inp,S){
   initDashActiveSet();
   var tbody=document.getElementById('pos-tbody');if(!tbody)return;
   var F=inp.fut||S;var sig=inp.iv/100;var allItems=[];
-  var lastPriceMaps={};
+  // Mark sources, in priority order (v7h): broker's own mark (Pi) > chain mid >
+  // chain last > BS model. Mid replaces last so even non-Pi marks track the
+  // real market, not a single stale trade.
+  var lastPriceMaps={},midPriceMaps={};
   histDB.forEach(function(h){
     if(!h.rows)return;
-    var m=lastPriceMaps[h.series]||{};
-    h.rows.forEach(function(row){if(row.last) m[row.type+row.strike]=row.last;});
-    lastPriceMaps[h.series]=m;
+    var ml=lastPriceMaps[h.series]||{},mm=midPriceMaps[h.series]||{};
+    h.rows.forEach(function(row){
+      if(row.last) ml[row.type+row.strike]=row.last;
+      var mid=(row.bid>0&&row.offer>0&&row.offer>=row.bid)?(row.bid+row.offer)/2:(row.bid>0?row.bid:0);
+      if(mid>0) mm[row.type+row.strike]=mid;
+    });
+    lastPriceMaps[h.series]=ml;midPriceMaps[h.series]=mm;
   });
+  var piMk=(window.piMarks&&(Date.now()-window.piMarks.ts<24*3600*1000))?window.piMarks:null;
   legs.forEach(function(l){
     var T=l.dte/365;
     var legSeries=l.series||'S50M26';
@@ -2917,21 +2941,43 @@ function renderPosTable(inp,S){
     }
     var bsPrice=bsp(legF,l.K,T,0,legSig,l.type);
     var lastKey=l.type+l.K;
-    var lastPriceMap=lastPriceMaps[legSeries]||{};
-    var mmPrice=lastPriceMap[lastKey]||bsPrice;
+    var lastPriceMap=lastPriceMaps[legSeries]||{},midPriceMap=midPriceMaps[legSeries]||{};
+    // MM val priority: broker mark (Pi) > chain mid > chain last > BS model
+    var brokerMk=piMk?piMk[legSeries+'|'+l.type+'|'+l.K]:null;
+    var mmPrice,mmSrc;
+    if(brokerMk&&brokerMk.mkt>0){mmPrice=brokerMk.mkt;mmSrc='Pi';}
+    else if(midPriceMap[lastKey]>0){mmPrice=midPriceMap[lastKey];mmSrc='Mid';}
+    else if(lastPriceMap[lastKey]>0){mmPrice=lastPriceMap[lastKey];mmSrc='Last';}
+    else{mmPrice=bsPrice;mmSrc='BS';}
     var delta=bsd(legF,l.K,T,0,legSig,l.type)*l.ls*l.lots;
     var gamma=bsg(legF,l.K,T,0,legSig)*l.ls*l.lots;
     var theta=bsth(legF,l.K,T,0,legSig,l.type)*l.ls*l.lots;
     var uPnl=l.ls*(mmPrice-l.prem)*l.lots;
-    var mmSrc=lastPriceMap[lastKey]?'Last':'BS';
+    // broker P/L cross-check: flag if the Desk's own uPnl disagrees with the
+    // broker's reported unrealized P/L (in points) by more than a tolerance.
+    var mmMult=(brokerMk&&brokerMk.mult)||200;
+    var xchk='';
+    if(brokerMk&&brokerMk.upnl!=null){
+      var deskB=uPnl*mmMult, diff=deskB-brokerMk.upnl;
+      if(Math.abs(diff)>Math.max(50,Math.abs(brokerMk.upnl)*0.01))
+        xchk=' <span style="color:var(--amber);font-size:8px" title="Desk P/L ฿'+Math.round(deskB).toLocaleString()+' vs broker ฿'+Math.round(brokerMk.upnl).toLocaleString()+' — ต่าง ฿'+Math.round(diff).toLocaleString()+' (เช็คทุน/lots)">⚠</span>';
+    }
     var key='opt_'+l.id;var isOn=dashActiveSet.has(key);
     var seriesTag=legSeries!=='S50M26'?' <span style="font-size:8px;color:var(--text3)">'+legSeries+'</span>':'';
-    allItems.push({key:key,isOn:isOn,label:l.type.toUpperCase()+seriesTag,tc:l.type==='call'?'tb2':'tr',ls:l.ls<0?'S':'L',lsc:l.ls<0?'var(--red)':'var(--green)',K:l.K,dte:l.dte,lots:l.lots,cost:f(l.prem),mmVal:f(mmPrice),mmSrc:mmSrc,delta:delta,theta:theta,gamma:gamma,uPnl:uPnl,rm:'removeLeg('+l.id+')'});
+    allItems.push({key:key,isOn:isOn,label:l.type.toUpperCase()+seriesTag,tc:l.type==='call'?'tb2':'tr',ls:l.ls<0?'S':'L',lsc:l.ls<0?'var(--red)':'var(--green)',K:l.K,dte:l.dte,lots:l.lots,cost:f(l.prem),mmVal:f(mmPrice),mmSrc:mmSrc,xchk:xchk,delta:delta,theta:theta,gamma:gamma,uPnl:uPnl,rm:'removeLeg('+l.id+')'});
   });
   tfexTrades.forEach(function(t){
-    var dir=t.dir==='long'?1:-1;var Ft=tfexFutPrice(t.series,undefined,inp);var uPnl=(Ft-t.price)*dir*t.lots;
+    var dir=t.dir==='long'?1:-1;
+    var brokerMk=piMk?piMk[(t.series||'S50M26')+'|fut']:null;
+    var Ft=(brokerMk&&brokerMk.mkt>0)?brokerMk.mkt:tfexFutPrice(t.series,undefined,inp);
+    var mmSrc=(brokerMk&&brokerMk.mkt>0)?'Pi':'';
+    var uPnl=(Ft-t.price)*dir*t.lots;
+    var xchk='';
+    if(brokerMk&&brokerMk.upnl!=null){var deskB=uPnl*(brokerMk.mult||200),diff=deskB-brokerMk.upnl;
+      if(Math.abs(diff)>Math.max(50,Math.abs(brokerMk.upnl)*0.01))
+        xchk=' <span style="color:var(--amber);font-size:8px" title="Desk P/L ฿'+Math.round(deskB).toLocaleString()+' vs broker ฿'+Math.round(brokerMk.upnl).toLocaleString()+'">⚠</span>';}
     var key='tfex_'+t.id;var isOn=dashActiveSet.has(key);
-    allItems.push({key:key,isOn:isOn,label:'TFEX',tc:'tc',ls:t.dir==='long'?'L':'S',lsc:t.dir==='long'?'var(--green)':'var(--red)',K:t.price.toFixed(1),dte:t.series||'-',lots:t.lots,cost:f(t.price),mmVal:f(Ft),delta:dir*t.lots,theta:0,gamma:0,uPnl:uPnl,rm:'removeTfexEntry('+t.id+')'});
+    allItems.push({key:key,isOn:isOn,label:'TFEX',tc:'tc',ls:t.dir==='long'?'L':'S',lsc:t.dir==='long'?'var(--green)':'var(--red)',K:t.price.toFixed(1),dte:t.series||'-',lots:t.lots,cost:f(t.price),mmVal:f(Ft),mmSrc:mmSrc,xchk:xchk,delta:dir*t.lots,theta:0,gamma:0,uPnl:uPnl,rm:'removeTfexEntry('+t.id+')'});
   });
   var badge=document.getElementById('active-count-badge');
   if(badge)badge.textContent=allItems.filter(function(i){return i.isOn;}).length+'/'+allItems.length+' active';
@@ -2947,7 +2993,7 @@ function renderPosTable(inp,S){
       '<td class="mono">'+item.dte+'</td>'+
       '<td class="mono">'+item.lots+'</td>'+
       '<td class="mono">'+item.cost+'</td>'+
-      '<td class="mono" title="'+(item.mmSrc||'BS')+' price">'+item.mmVal+'<span style="font-size:8px;color:var(--text3);margin-left:2px">'+(item.mmSrc==='Last'?'L':'')+'</span></td>'+
+      '<td class="mono" title="'+(item.mmSrc||'BS')+' mark — Pi=broker mark, Mid=(bid+offer)/2, Last=last trade, BS=model">'+item.mmVal+'<span style="font-size:8px;color:'+(item.mmSrc==='Pi'?'var(--green)':'var(--text3)')+';margin-left:2px">'+(item.mmSrc&&item.mmSrc!=='Mid'?item.mmSrc:'')+'</span>'+(item.xchk||'')+'</td>'+
       '<td class="mono" style="color:'+cv(item.delta)+'">'+fc(item.delta,2)+'</td>'+
       '<td class="mono" style="color:'+(item.theta>0?'var(--green)':'var(--red)')+'">'+fc(item.theta,4)+'</td>'+
       '<td class="mono">'+f(item.gamma,5)+'</td>'+
