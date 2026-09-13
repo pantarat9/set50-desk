@@ -1670,6 +1670,13 @@ function loadState(){
   try{var t=LS.getItem('s50_tfex');if(t)tfexTrades=JSON.parse(t);}catch(e){}
   try{var q=LS.getItem('s50_futq');if(q)futQuotes=JSON.parse(q)||{};}catch(e){} // v7d
   try{var j=LS.getItem('s50_journal');if(j)journalDB=JSON.parse(j);}catch(e){} // v7g
+  // v7i: PDGS-reconstructed daily-series backfill. DELIBERATELY a separate
+  // store from histDB — it holds NO option chain, only {date,series,F,K,straddle}.
+  // It must never be merged into histDB: many histDB.find(h=>h.series===s) call
+  // sites (leg marks, futures pricing, P&L) take the first match without checking
+  // rows.length, so a synthetic entry there would silently feed pricing.
+  // Consumed ONLY by renderHistCharts().
+  try{var bf=LS.getItem('s50_histbf');if(bf)histBF=JSON.parse(bf)||[];}catch(e){}
 }
 function saveState(){
   try{LS.setItem('s50_legs',JSON.stringify(legs));}catch(e){}
@@ -2079,8 +2086,8 @@ function clearLegs(){if(confirm('Clear all option legs?')){legs=[];dashActiveSet
 // and the saved position book. Use before handing the file to someone else.
 function deleteAllData(){
   if(!confirm('Delete ALL position history on this device?\n\nThis removes every option leg, futures trade, imported chain, and saved position-book entry. It cannot be undone.'))return;
-  legs=[];tfexTrades=[];histDB=[];posBook=[];importRows=[];dashActiveSet=null;futQuotes={};
-  try{['s50_legs','s50_hist','s50_tfex','s50_book','s50_defseries','s50_inputs','s50_futq'].forEach(function(k){LS.removeItem(k);});}catch(e){}
+  legs=[];tfexTrades=[];histDB=[];posBook=[];importRows=[];dashActiveSet=null;futQuotes={};histBF=[];
+  try{['s50_legs','s50_hist','s50_tfex','s50_book','s50_defseries','s50_inputs','s50_futq','s50_histbf'].forEach(function(k){LS.removeItem(k);});}catch(e){}
   try{LS.setItem('s50_wiped','1');}catch(e){} // stops the built-in demo data from reloading on this device
   saveState();saveTfex();saveFutQ();if(typeof bookSaveDB==='function')bookSaveDB();
   refreshSeriesDropdowns();
@@ -3764,6 +3771,18 @@ function renderHist(){
 // snapshot futures log returns, each normalized by sqrt(gap days) then
 // annualized — only drawn when >=21 snapshots exist (true RV20), else omitted.
 var histCharts={};
+// v7i: reconstructed daily-series points (see loadState note). Never enters histDB.
+var histBF=[];
+// Mirrors histAtmStats' output shape, but from a stored ATM straddle instead of a
+// chain. IV uses the SAME Brenner-Subrahmanyam expression as histAtmStats so real
+// and reconstructed points sit on one consistent curve (no step at the seam).
+function bfAtmStats(b){
+  if(!b||!b.F||!(b.straddle>0))return null;
+  var dte=(b.dte!=null?b.dte:histDteAt(b.series,b.date));
+  var T=(dte!==null?Math.max(dte,1):30)/365;
+  var iv=((b.straddle/b.F)/Math.sqrt(2/Math.PI*T))*100;
+  return{date:b.date,F:b.F,K:b.K,straddle:b.straddle,iv:iv,dte:dte,bf:true};
+}
 function histDteAt(series,dateISO){
   var d=seriesExpiry(series);if(!d||!dateISO)return null;
   var t=new Date(dateISO+'T00:00:00');
@@ -3797,6 +3816,7 @@ function histAtmStats(h){
 function renderHistCharts(){
   var sel=document.getElementById('hc-series');if(!sel)return;
   var seriesList=[];histDB.forEach(function(h){if(h.series&&h.rows&&h.rows.length&&seriesList.indexOf(h.series)<0)seriesList.push(h.series);});
+  histBF.forEach(function(b){if(b.series&&seriesList.indexOf(b.series)<0)seriesList.push(b.series);}); // v7i
   var cur=sel.value;
   sel.innerHTML=seriesList.map(function(s){return '<option value="'+s+'">'+s+'</option>';}).join('');
   if(seriesList.indexOf(cur)>=0)sel.value=cur; else if(seriesList.length)sel.value=seriesList[0];
@@ -3807,8 +3827,16 @@ function renderHistCharts(){
   // de-dup same date (keep last saved)
   var seen={},uniq=[];pts.forEach(function(p){if(seen[p.date]!==undefined)uniq[seen[p.date]]=p;else{seen[p.date]=uniq.length;uniq.push(p);}});
   pts=uniq;
+  // v7i: merge reconstructed points for dates with no real chain. Real data always
+  // wins — a backfill point is dropped whenever that date already has a snapshot.
+  var realDates={};pts.forEach(function(p){realDates[p.date]=1;});
+  var nBF=0;
+  histBF.filter(function(b){return b.series===series&&!realDates[b.date];})
+    .map(bfAtmStats).filter(function(x){return x!==null;})
+    .forEach(function(p){pts.push(p);nBF++;});
+  pts.sort(function(a,b){return a.date.localeCompare(b.date);});
   ['fu','iv','prem'].forEach(function(k){if(histCharts[k]){histCharts[k].destroy();histCharts[k]=null;}});
-  if(pts.length<2){if(note)note.textContent=series?('Need >=2 saved chain days for '+series+' (have '+pts.length+'). Import + Save chains daily to build this.'):'No chain snapshots saved yet.';return;}
+  if(pts.length<2){if(note)note.textContent=series?('Need >=2 days for '+series+' (have '+pts.length+'). Import + Save chains daily, or run the PDGS backfill.'):'No chain snapshots saved yet.';return;}
   // RV from futures log returns normalized by gap days
   var rv=new Array(pts.length).fill(null);
   var rets=[];
@@ -3826,26 +3854,35 @@ function renderHistCharts(){
     }
   }
   var labels=pts.map(function(p){return p.date.slice(5);});
+  // v7i: hollow, smaller points = reconstructed from PDGS (no saved chain that day).
+  // On the Fu chart those are the real PDGS close; on IV/straddle they are derived.
+  function ptRad(){return pts.map(function(p){return p.bf?1.5:2.5;});}
+  function ptBg(c){return pts.map(function(p){return p.bf?'rgba(10,16,28,.9)':c;});}
+  function ptBd(c){return pts.map(function(p){return p.bf?'rgba(255,255,255,.35)':c;});}
   function mkChart(id,datasets,fmt){
     return new Chart(document.getElementById(id),{type:'line',data:{labels:labels,datasets:datasets},
       options:{responsive:true,maintainAspectRatio:false,
         plugins:{legend:{display:true,labels:{color:'#8899bb',boxWidth:14,font:{size:9}}},
-          tooltip:{callbacks:{label:function(c){return c.dataset.label+': '+(c.parsed.y===null?'—':(+c.parsed.y).toFixed(2)+(fmt||''));}}}},
+          tooltip:{callbacks:{label:function(c){
+            if(c.parsed.y===null)return c.dataset.label+': —';
+            var p=pts[c.dataIndex],tag=(p&&p.bf&&c.dataset.label.indexOf('RV20')<0)?' · PDGS':'';
+            return c.dataset.label+': '+(+c.parsed.y).toFixed(2)+(fmt||'')+tag;}}}},
         scales:{x:{grid:{color:'rgba(26,40,64,.7)'},ticks:{color:'#304060',maxTicksLimit:10,font:{size:9,family:'IBM Plex Mono'}},border:{color:'#1a2840'}},
                 y:{grid:{color:'rgba(26,40,64,.7)'},ticks:{color:'#304060',font:{size:9,family:'IBM Plex Mono'}},border:{color:'#1a2840'}}},
         animation:{duration:200}}});
   }
-  histCharts.fu=mkChart('hc-fu',[{label:series+' futures',data:pts.map(function(p){return p.F;}),borderColor:'#44aaff',backgroundColor:'rgba(68,170,255,.07)',borderWidth:2,fill:true,tension:0.2,pointRadius:2}]);
-  var ivDs=[{label:'ATM IV % (straddle approx)',data:pts.map(function(p){return +p.iv.toFixed(2);}),borderColor:'#ffaa00',borderWidth:2,fill:false,tension:0.2,pointRadius:2}];
+  histCharts.fu=mkChart('hc-fu',[{label:series+' futures',data:pts.map(function(p){return p.F;}),borderColor:'#44aaff',backgroundColor:'rgba(68,170,255,.07)',borderWidth:2,fill:true,tension:0.2,pointRadius:ptRad(),pointBackgroundColor:ptBg('#44aaff'),pointBorderColor:ptBd('#44aaff')}]);
+  var ivDs=[{label:'ATM IV % (straddle approx)',data:pts.map(function(p){return +p.iv.toFixed(2);}),borderColor:'#ffaa00',borderWidth:2,fill:false,tension:0.2,pointRadius:ptRad(),pointBackgroundColor:ptBg('#ffaa00'),pointBorderColor:ptBd('#ffaa00')}];
   if(rets.length>=RVWIN)ivDs.push({label:'RV20 %',data:rv.map(function(v){return v===null?null:+v.toFixed(2);}),borderColor:'#b478ff',borderWidth:2,borderDash:[5,3],fill:false,tension:0.2,pointRadius:0,spanGaps:false});
   histCharts.iv=mkChart('hc-iv',ivDs);
-  histCharts.prem=mkChart('hc-prem',[{label:'ATM straddle (pts)',data:pts.map(function(p){return +p.straddle.toFixed(2);}),borderColor:'#00e59a',backgroundColor:'rgba(0,229,154,.07)',borderWidth:2,fill:true,tension:0.2,pointRadius:2}]);
+  histCharts.prem=mkChart('hc-prem',[{label:'ATM straddle (pts)',data:pts.map(function(p){return +p.straddle.toFixed(2);}),borderColor:'#00e59a',backgroundColor:'rgba(0,229,154,.07)',borderWidth:2,fill:true,tension:0.2,pointRadius:ptRad(),pointBackgroundColor:ptBg('#00e59a'),pointBorderColor:ptBd('#00e59a')}]);
   if(note){
     var last=pts[pts.length-1];
     var vrp='';
     if(rets.length>=RVWIN){var lastRv=rv[pts.length-1];if(lastRv!=null)vrp=' · VRP now: '+(last.iv-lastRv>=0?'+':'')+(last.iv-lastRv).toFixed(1)+' pts (ATM IV − RV20)';}
     else vrp=' · RV20 needs >=21 snapshots (have '+pts.length+')';
-    note.textContent=pts.length+' snapshot days · last '+last.date+': F '+last.F+', ATM '+last.K+' straddle '+last.straddle.toFixed(1)+' pts, IV '+last.iv.toFixed(1)+'%'+vrp;
+    var bfTxt=nBF?(' ('+(pts.length-nBF)+' saved chains + '+nBF+' PDGS-reconstructed — hollow points; IV/straddle derived from Total Premium, Fu is the real PDGS close)'):'';
+    note.textContent=pts.length+' days'+bfTxt+' · last '+last.date+(last.bf?' [PDGS]':'')+': F '+last.F+', ATM '+last.K+' straddle '+last.straddle.toFixed(1)+' pts, IV '+last.iv.toFixed(1)+'%'+vrp;
   }
 }
 
